@@ -1,0 +1,30 @@
+[Unit]
+Description=ФормаБот — Telegram-бот тренировок и питания
+Documentation=file:///opt/formabot/README.md
+After=network-online.target
+Wants=network-online.target
+# Перезапускаем без ограничений: бот должен подниматься всегда.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=formabot
+Group=formabot
+WorkingDirectory=/opt/formabot
+
+# Логи идут в journald сразу, без буферизации.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/formabot/.venv/bin/python -m bot.main
+
+Restart=always
+RestartSec=5
+
+# Ограничения: боту нужен только свой каталог.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/formabot
+
+[Install]
+WantedBy=multi-user.target
