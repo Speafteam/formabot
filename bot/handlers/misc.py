@@ -289,7 +289,7 @@ async def times_open(call: CallbackQuery, conn) -> None:
 
 @router.callback_query(F.data == "more:coach")
 async def coach_open(call: CallbackQuery) -> None:
-    await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.tariffs())
+    await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.services())
     await call.answer()
 
 

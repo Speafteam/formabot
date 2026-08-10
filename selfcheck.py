@@ -612,6 +612,97 @@ async def migration_check():
 asyncio.run(db_check())
 asyncio.run(migration_check())
 
+print("\n--- путь заявки на тренера ---")
+from bot import keyboards as kb  # noqa: E402
+from bot.handlers.misc import service_card  # noqa: E402
+
+
+def buttons(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+# Кнопка «Живой тренер» в меню «Ещё» должна вести на существующий обработчик.
+check("в меню есть живой тренер", "more:coach" in buttons(kb.MORE), True)
+
+menu = buttons(kb.services())
+check("в списке все три услуги", len(menu), 3)
+for code in SERVICES:
+    if f"coach:{code}" not in menu:
+        ok = False
+        print(f"FAIL услуги нет в списке: {code}")
+
+for code, s in SERVICES.items():
+    if s["periods"]:
+        marks = buttons(kb.periods_menu(code))
+        check(f"  {code}: сроков четыре плюс назад", len(marks), 5)
+        for months, _ in PERIODS:
+            if f"coach:period:{code}:{months}" not in marks:
+                ok = False
+                print(f"FAIL нет срока {months} у {code}")
+        for months, _ in PERIODS:
+            card = service_card(code, months)
+            if "{" in card or money(price_for(code, months)["total"]) not in card:
+                ok = False
+                print(f"FAIL карточка {code}/{months} собралась криво")
+    else:
+        card = service_card(code)
+        check(f"  {code}: карточка без срока", "Бесплатно." in card, True)
+
+# Предупреждение про ник обязано быть до кнопки отправки, а не после.
+for code in SERVICES:
+    if "ник" not in service_card(code, 3 if SERVICES[code]["periods"] else 0):
+        ok = False
+        print(f"FAIL нет предупреждения про ник: {code}")
+print("ok   предупреждение про ник есть на каждой карточке")
+
+confirm = buttons(kb.confirm_lead("coaching", 6))
+check("на карточке есть отправка", "coach:send:coaching:6" in confirm, True)
+check("на карточке есть комментарий", "coach:note:coaching:6" in confirm, True)
+check("на карточке есть возврат", "coach:back" in confirm, True)
+check("кнопка без комментария ведёт куда надо",
+      buttons(kb.SKIP_COMMENT), ["coach:nonote"])
+
+# Все callback_data должны укладываться в лимит Telegram.
+for markup in [kb.MORE, kb.services(), kb.SKIP_COMMENT,
+               kb.periods_menu("coaching_plus"), kb.confirm_lead("coaching", 12)]:
+    for data in buttons(markup):
+        if len(data.encode("utf-8")) > 64:
+            ok = False
+            print(f"FAIL слишком длинная кнопка: {data}")
+print("ok   кнопки укладываются в лимит Telegram")
+
+print("\n--- обращения к несуществующим функциям ---")
+# Питон не проверяет module.attr до момента вызова, поэтому опечатка или
+# переименование живут в коде молча и всплывают у пользователя нажатием
+# кнопки, которая ничего не делает. Разбираем исходники и сверяем.
+import ast as _ast          # noqa: E402
+import importlib as _imp    # noqa: E402
+import pathlib as _pl       # noqa: E402
+
+_watched = {}
+for _name in ("keyboards", "programs", "db", "calc", "banter", "achievements",
+              "food_ru", "fatsecret", "parsing", "config", "scheduler"):
+    _watched[_name] = _imp.import_module(f"bot.{_name}")
+
+_broken = []
+for _path in sorted(_pl.Path("bot").rglob("*.py")):
+    _tree = _ast.parse(_path.read_text(encoding="utf-8"))
+    for _node in _ast.walk(_tree):
+        if (isinstance(_node, _ast.Attribute)
+                and isinstance(_node.value, _ast.Name)
+                and _node.value.id in _watched
+                and not hasattr(_watched[_node.value.id], _node.attr)):
+            _broken.append(
+                f"{_path.as_posix()}:{_node.lineno} — "
+                f"{_node.value.id}.{_node.attr}")
+
+for _item in _broken:
+    ok = False
+    print(f"FAIL нет такой функции: {_item}")
+if not _broken:
+    print(f"ok   все обращения к модулям существуют "
+          f"(проверено {len(_watched)} модулей)")
+
 print("\n--- импорт обработчиков ---")
 try:
     from bot.handlers import build_router
