@@ -37,7 +37,7 @@ def inline(pairs, per_row=1) -> InlineKeyboardMarkup:
 
 MAIN_MENU = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Тренировка"), KeyboardButton(text="Сегодня")],
+        [KeyboardButton(text="Тренировка"), KeyboardButton(text="Еда")],
         [KeyboardButton(text="Вода"), KeyboardButton(text="Вес")],
         [KeyboardButton(text="Ещё")],
     ],

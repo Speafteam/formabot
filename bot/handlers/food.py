@@ -154,7 +154,8 @@ async def undo(call: CallbackQuery, conn) -> None:
     await call.answer()
 
 
-@router.message(F.text == "Сегодня")
+@router.message(F.text == "Еда")
+@router.message(F.text == "Сегодня")     # старое название, у кого-то ещё в меню
 async def day_report(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
@@ -165,7 +166,7 @@ async def day_report(message: Message, conn) -> None:
     meals = await db.day_meals(conn, message.from_user.id)
     drunk = await db.water_total(conn, message.from_user.id)
 
-    lines = [totals_block(row, totals), ""]
+    lines = ["<b>Еда за сегодня</b>", "", totals_block(row, totals), ""]
     lines.append(
         f"Вода: <b>{drunk / 1000:.1f}</b> из {row['water_ml'] / 1000:.1f} л".replace(
             ".", ","
@@ -175,8 +176,10 @@ async def day_report(message: Message, conn) -> None:
         lines += ["", "<i>Съедено за день</i>"]
         lines += [f"  • {m['name']}, {m['grams']:g} г — {m['kcal']:.0f} ккал"
                   for m in meals]
+        lines += ["", "<i>Чтобы добавить — просто напиши: «творог 200 г».</i>"]
     else:
-        lines += ["", "Записей ноль. Что не посчитано — то не контролируется.\n"
-                      "Начни: «овсянка 60 г»."]
+        lines += ["", "Записей ноль. Что не посчитано — то не контролируется.",
+                  "", "Кнопки для записи нет и не нужна — просто напиши в чат, "
+                      "что съел: <b>«овсянка 60 г»</b>."]
 
     await message.answer("\n".join(lines))
