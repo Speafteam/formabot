@@ -188,6 +188,41 @@ check("текущая неделя пуста, прошлые есть",
 check("разрыв в неделях",
       ach.week_streak(days_ago(0, 7, 21), TODAY), 2)
 
+print("\n--- серии с выходными по расписанию ---")
+# 10 августа 2026 — понедельник. Тренировки только пн, ср, пт.
+MON_WED_FRI = {0, 2, 4}
+check("опорная дата — понедельник", TODAY.weekday(), 0)
+# Тренировался пн, пт, ср прошлой недели — выходные между ними не в счёт.
+check("выходные не рвут серию",
+      ach.streak(days_ago(0, 3, 5), TODAY, expected=MON_WED_FRI), 3)
+# А вот пропуск запланированной среды — уже пропуск, но первый прощается.
+check("пропуск запланированного дня прощается",
+      ach.streak(days_ago(0, 5, 7), TODAY, expected=MON_WED_FRI), 3)
+# Без расписания те же данные дают куда более короткую серию.
+check("без расписания серия короче",
+      ach.streak(days_ago(0, 3, 5), TODAY), 1)
+
+print("\n--- расписание по дням ---")
+import bot.db as dbm  # noqa: E402
+
+default = dbm.default_schedule()
+check("по умолчанию семь дней", len(default), 7)
+check("по умолчанию всё включено", len(dbm.training_days(default)), 7)
+check("выходных по умолчанию нет", dbm.rest_days(default), [])
+
+mine = dbm.default_schedule()
+mine[1]["am"] = False            # вторник только короткий
+mine[5] = {"am": False, "pm": False}   # суббота выходной
+mine[6] = {"am": False, "pm": False}   # воскресенье выходной
+check("основных четыре", len(dbm.days_with(mine, "am")), 4)
+check("коротких пять", len(dbm.days_with(mine, "pm")), 5)
+check("выходных два", dbm.rest_days(mine), [5, 6])
+check("тренировочных дней пять", sorted(dbm.training_days(mine)), [0, 1, 2, 3, 4])
+
+empty = {d: {"am": False, "pm": False} for d in range(7)}
+check("пустое расписание — ни одного дня", dbm.training_days(empty), set())
+check("пустое расписание — все выходные", len(dbm.rest_days(empty)), 7)
+
 print("\n--- ступени достижений ---")
 fire = ach.BY_CODE["workout_streak"]
 check("ноль — ступеней нет", fire.tier_of(0), 0)
@@ -378,6 +413,23 @@ async def db_check():
     prefs = m.user_nicknames(await m.get_user(conn, 1))
     check("сброс чистит всё", prefs, {"banned": [], "custom": []})
 
+    print("     расписание:")
+    row = await m.get_user(conn, 1)
+    check("новичку доступны все дни", len(m.training_days(m.user_schedule(row))), 7)
+    await m.toggle_slot(conn, 1, 1, "am")      # вторник без основной
+    await m.toggle_slot(conn, 1, 5, "am")
+    await m.toggle_slot(conn, 1, 5, "pm")      # суббота выходной
+    row = await m.get_user(conn, 1)
+    sched = m.user_schedule(row)
+    check("вторник без основной", sched[1]["am"], False)
+    check("вторник с коротким", sched[1]["pm"], True)
+    check("суббота выходной", m.rest_days(sched), [5])
+    check("остальные дни целы", sched[0], {"am": True, "pm": True})
+    # Повторное нажатие возвращает как было.
+    await m.toggle_slot(conn, 1, 1, "am")
+    check("переключатель работает в обе стороны",
+          m.user_schedule(await m.get_user(conn, 1))[1]["am"], True)
+
     print("     тренировки и достижения:")
     await m.log_workout(conn, 1, "am", "gym", "strength", 112)
     await m.log_workout(conn, 1, "pm", "home", "cardio", 25)
@@ -442,6 +494,7 @@ async def migration_check():
     check("колонка pref_place добавлена", "pref_place" in columns, True)
     check("колонка pref_kind добавлена", "pref_kind" in columns, True)
     check("колонка nicknames_json добавлена", "nicknames_json" in columns, True)
+    check("колонка schedule_json добавлена", "schedule_json" in columns, True)
 
     cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = {r["name"] for r in await cur.fetchall()}

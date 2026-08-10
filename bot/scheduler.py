@@ -67,17 +67,49 @@ class Runner:
         self._clear_user_jobs(tg_id)
         times = db.user_times(row)
 
+        schedule = db.user_schedule(row)
+        # Тренировочные напоминания ставим только на выбранные дни недели.
+        slot_days = {
+            "workout_am": db.days_with(schedule, "am"),
+            "workout_pm": db.days_with(schedule, "pm"),
+        }
+
         for key, value in times.items():
             try:
                 hour, minute = (int(p) for p in value.split(":"))
             except ValueError:
                 log.warning("Кривое время %r у пользователя %s", value, tg_id)
                 continue
+
+            days = slot_days.get(key)
+            if days is not None and not days:
+                continue          # такой тренировки нет ни в одном дне
+            trigger = CronTrigger(
+                hour=hour, minute=minute, timezone=TZ,
+                **({"day_of_week": ",".join(str(d) for d in days)} if days else {}),
+            )
             self.sched.add_job(
                 self._fire_reminder,
-                CronTrigger(hour=hour, minute=minute, timezone=TZ),
+                trigger,
                 id=f"u{tg_id}:{key}",
                 args=[tg_id, key],
+                replace_existing=True,
+                misfire_grace_time=600,
+            )
+
+        # В полностью свободные дни говорим, что это отдых, а не сбой бота.
+        idle = db.rest_days(schedule)
+        if idle:
+            try:
+                hour, minute = (int(p) for p in times["workout_am"].split(":"))
+            except (ValueError, KeyError):
+                hour, minute = 7, 30
+            self.sched.add_job(
+                self._fire_reminder,
+                CronTrigger(day_of_week=",".join(str(d) for d in idle),
+                            hour=hour, minute=minute, timezone=TZ),
+                id=f"u{tg_id}:rest_day",
+                args=[tg_id, "rest_day"],
                 replace_existing=True,
                 misfire_grace_time=600,
             )
@@ -169,6 +201,14 @@ class Runner:
                 f"<b>{banter.litres(norm)} л</b>. {tail}"
             )
             return text, keyboards.WATER
+
+        if key == "rest_day":
+            return (
+                "Сегодня выходной. 😴\n\n"
+                "Мышца растёт не в зале, а в отдыхе — так что это часть плана, "
+                "а не пропуск. Серию не рвёт.\n\n"
+                "Еда и вода по расписанию, их никто не отменял."
+            ), None
 
         if key == "weigh_in":
             return ("Воскресенье. ⚖️ Время сверить, что было на словах, "

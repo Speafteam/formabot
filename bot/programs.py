@@ -265,25 +265,33 @@ WEEKDAYS = ["Понедельник", "Вторник", "Среда", "Четв�
             "Суббота", "Воскресенье"]
 
 
-def week_plan(goal: str, place: str, kind: str, start_ordinal: int) -> list[dict]:
+def week_plan(goal: str, place: str, kind: str, start_ordinal: int,
+              schedule: dict | None = None) -> list[dict]:
     """Что стоит в расписании на семь дней вперёд, начиная с сегодня.
 
     Программа зависит от дня, поэтому её достаточно пересобрать на каждый
     день — состав получится ровно тот, который придёт человеку утром.
+
+    schedule — выбор пользователя по дням недели. Без него считаем, что
+    запланировано всё.
     """
     days = []
     for offset in range(7):
         index = start_ordinal + offset
-        morning = build(goal, place, kind, "am", index)
-        evening = build(goal, place, "cardio", "pm", index)
+        weekday = (start_ordinal + offset - 1) % 7
+        marks = schedule[weekday] if schedule else {"am": True, "pm": True}
+
+        morning = build(goal, place, kind, "am", index) if marks["am"] else None
+        evening = build(goal, place, "cardio", "pm", index) if marks["pm"] else None
+
         days.append(
             {
                 "offset": offset,
-                "weekday": WEEKDAYS[(start_ordinal + offset - 1) % 7],
-                "am_title": morning["title"],
-                "am_minutes": morning["minutes"],
-                "pm_title": evening["title"],
-                "pm_minutes": evening["minutes"],
+                "weekday": WEEKDAYS[weekday],
+                "am_title": morning["title"] if morning else None,
+                "am_minutes": morning["minutes"] if morning else 0,
+                "pm_title": evening["title"] if evening else None,
+                "pm_minutes": evening["minutes"] if evening else 0,
             }
         )
     return days
@@ -293,14 +301,24 @@ def render_week(days: list[dict], place: str, kind: str) -> str:
     lines = [
         f"<b>План на неделю</b>\n{PLACES[place]} · {KINDS[kind]}", ""
     ]
+    total = 0
     for day in days:
         mark = "Сегодня" if day["offset"] == 0 else day["weekday"]
-        lines.append(
-            f"<b>{mark}</b>\n"
-            f"  утро — {day['am_title']}, {day['am_minutes']} мин\n"
-            f"  вечер — {day['pm_title']}, {day['pm_minutes']} мин"
-        )
-    lines += ["", "<i>Семь дней расписаны. Осталось прийти.</i>"]
+        if not day["am_title"] and not day["pm_title"]:
+            lines.append(f"<b>{mark}</b>\n  выходной")
+            continue
+        rows = [f"<b>{mark}</b>"]
+        if day["am_title"]:
+            rows.append(f"  утро — {day['am_title']}, {day['am_minutes']} мин")
+            total += day["am_minutes"]
+        if day["pm_title"]:
+            rows.append(f"  вечер — {day['pm_title']}, {day['pm_minutes']} мин")
+            total += day["pm_minutes"]
+        lines.append("\n".join(rows))
+
+    hours, minutes = divmod(total, 60)
+    lines += ["", f"<i>За неделю — {hours} ч {minutes} мин работы. "
+                  "Осталось прийти.</i>"]
     return "\n".join(lines)
 
 

@@ -109,10 +109,16 @@ ALL: tuple[Achievement, ...] = (
 BY_CODE = {a.code: a for a in ALL}
 
 
-def streak(days: list[str], today_: date | None = None) -> int:
+def streak(days: list[str], today_: date | None = None,
+           expected: set[int] | None = None) -> int:
     """Длина серии в днях с поблажкой: один пропуск на семь прощается.
 
     Сегодняшний день без отметки серию не рвёт — он ещё не закончился.
+
+    expected — номера дней недели, в которые тренировка запланирована
+    (0 это понедельник). Дни вне этого набора пропускаются целиком: они
+    не идут в счёт и не считаются пропуском. Без этого человек с тремя
+    тренировками в неделю не взял бы ни одной ступени.
     """
     if not days:
         return 0
@@ -128,6 +134,9 @@ def streak(days: list[str], today_: date | None = None) -> int:
         day = today_ - timedelta(days=offset)
         if day < earliest:
             break                     # раньше первой отметки считать нечего
+        if expected is not None and day.weekday() not in expected:
+            offset += 1
+            continue                  # выходной по плану — просто мимо
         if day.isoformat() in done:
             count += 1
         elif offset == 0:
@@ -171,9 +180,11 @@ async def values_for(conn, row) -> dict[str, int]:
 
     tg_id = row["tg_id"]
     counts = await db.counters(conn, tg_id)
+    planned = db.training_days(db.user_schedule(row))
 
     return {
-        "workout_streak": streak(await db.workout_days(conn, tg_id)),
+        "workout_streak": streak(await db.workout_days(conn, tg_id),
+                                 expected=planned or None),
         "protein_streak": streak(
             await db.protein_days(conn, tg_id, row["protein"] or 0)),
         "water_streak": streak(

@@ -41,12 +41,42 @@ MORE = inline(
     [
         ("🏆 Достижения", "more:achievements"),
         ("Профиль", "more:profile"),
+        ("Дни тренировок", "sched:menu"),
         ("План на неделю", "more:plan"),
         ("Напоминания", "more:times"),
         ("Как ко мне обращаться", "nick:menu"),
         ("Живой тренер", "more:coach"),
     ]
 )
+
+
+def schedule_menu(schedule: dict) -> InlineKeyboardMarkup:
+    """Семь строк по две кнопки: основная и короткий блок на каждый день.
+
+    Нажатие переключает одну ячейку — состояние видно сразу на кнопке,
+    гадать не приходится.
+    """
+    from .db import WEEKDAYS_SHORT
+
+    rows = []
+    for day in range(7):
+        marks = schedule[day]
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{WEEKDAYS_SHORT[day]}  🏋️ {'✅' if marks['am'] else '➖'}",
+                callback_data=f"sched:t:{day}:am",
+            ),
+            InlineKeyboardButton(
+                text=f"⚡ {'✅' if marks['pm'] else '➖'}",
+                callback_data=f"sched:t:{day}:pm",
+            ),
+        ])
+    rows += _rows([
+        ("Всё включить", "sched:all"),
+        ("Только будни", "sched:weekdays"),
+        ("Сбросить в ноль", "sched:none"),
+    ], per_row=1)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def nicknames_menu(pool: list[str], custom: list[str],

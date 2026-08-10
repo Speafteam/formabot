@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
     pref_place    TEXT,
     pref_kind     TEXT,
     nicknames_json TEXT,
+    schedule_json TEXT,
     created_at    TEXT
 );
 
@@ -155,7 +156,7 @@ async def _migrate(conn: aiosqlite.Connection) -> None:
     cur = await conn.execute("PRAGMA table_info(users)")
     present = {row["name"] for row in await cur.fetchall()}
     for column, decl in (("pref_place", "TEXT"), ("pref_kind", "TEXT"),
-                         ("nicknames_json", "TEXT")):
+                         ("nicknames_json", "TEXT"), ("schedule_json", "TEXT")):
         if column not in present:
             await conn.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
 
@@ -213,6 +214,70 @@ async def set_time(conn, tg_id: int, key: str, value: str) -> dict:
     )
     await conn.commit()
     return times
+
+
+# ---------- расписание тренировок по дням недели ----------
+
+WEEKDAYS = ("Понедельник", "Вторник", "Среда", "Четверг", "Пятница",
+            "Суббота", "Воскресенье")
+WEEKDAYS_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+SLOTS = ("am", "pm")
+
+
+def default_schedule() -> dict[int, dict[str, bool]]:
+    """По умолчанию каждый день обе тренировки — как было до расписания."""
+    return {day: {"am": True, "pm": True} for day in range(7)}
+
+
+def user_schedule(row) -> dict[int, dict[str, bool]]:
+    """Что стоит в каждом дне недели. Ключ — день, 0 это понедельник."""
+    schedule = default_schedule()
+    raw = row["schedule_json"] if row is not None else None
+    if not raw:
+        return schedule
+    try:
+        saved = json.loads(raw)
+    except json.JSONDecodeError:
+        return schedule
+    for day in range(7):
+        stored = saved.get(str(day))
+        if isinstance(stored, dict):
+            for slot in SLOTS:
+                schedule[day][slot] = bool(stored.get(slot))
+    return schedule
+
+
+async def save_schedule(conn, tg_id: int, schedule: dict) -> None:
+    packed = {str(day): schedule[day] for day in range(7)}
+    await conn.execute(
+        "UPDATE users SET schedule_json = ? WHERE tg_id = ?",
+        (json.dumps(packed, ensure_ascii=False), tg_id),
+    )
+    await conn.commit()
+
+
+async def toggle_slot(conn, tg_id: int, day: int, slot: str) -> dict:
+    row = await get_user(conn, tg_id)
+    schedule = user_schedule(row)
+    schedule[day][slot] = not schedule[day][slot]
+    await save_schedule(conn, tg_id, schedule)
+    return schedule
+
+
+def days_with(schedule: dict, slot: str) -> list[int]:
+    return [day for day in range(7) if schedule[day][slot]]
+
+
+def rest_days(schedule: dict) -> list[int]:
+    """Дни, в которые не запланировано ничего."""
+    return [day for day in range(7)
+            if not schedule[day]["am"] and not schedule[day]["pm"]]
+
+
+def training_days(schedule: dict) -> set[int]:
+    """Дни, в которые хоть что-то запланировано. По ним считаются серии."""
+    return {day for day in range(7)
+            if schedule[day]["am"] or schedule[day]["pm"]}
 
 
 # ---------- прозвища ----------

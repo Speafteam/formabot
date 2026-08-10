@@ -252,13 +252,16 @@ async def plan_open(call: CallbackQuery, conn) -> None:
     place = row["pref_place"] or "gym"
     kind = row["pref_kind"] or "strength"
     days = programs.week_plan(
-        row["goal"] or "maintain", place, kind, date.today().toordinal()
+        row["goal"] or "maintain", place, kind, date.today().toordinal(),
+        db.user_schedule(row),
     )
     await call.message.edit_text(
         programs.render_week(days, place, kind),
-        reply_markup=keyboards.inline(
-            [("Сменить место и тип", "edit:place"), ("Начать тренировку", "w:slot:am")]
-        ),
+        reply_markup=keyboards.inline([
+            ("Сменить дни тренировок", "sched:menu"),
+            ("Сменить место и тип", "edit:place"),
+            ("Начать тренировку", "w:slot:am"),
+        ]),
     )
     await call.answer()
 
@@ -279,6 +282,96 @@ async def times_open(call: CallbackQuery, conn) -> None:
 @router.callback_query(F.data == "more:coach")
 async def coach_open(call: CallbackQuery) -> None:
     await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.tariffs())
+    await call.answer()
+
+
+# ---------- дни тренировок ----------
+
+def schedule_text(schedule: dict) -> str:
+    lines = [
+        "<b>Дни тренировок</b>",
+        "",
+        "🏋️ основная, около двух часов.  ⚡ короткий блок, 25 минут.",
+        "Жми на ячейку, чтобы включить или выключить. Можно оба, можно одно, "
+        "можно выходной — как удобно.",
+        "",
+    ]
+    for day in range(7):
+        marks = schedule[day]
+        if marks["am"] and marks["pm"]:
+            what = "основная + короткий"
+        elif marks["am"]:
+            what = "основная"
+        elif marks["pm"]:
+            what = "короткий блок"
+        else:
+            what = "выходной"
+        lines.append(f"<b>{db.WEEKDAYS[day]}</b> — {what}")
+
+    total_am = len(db.days_with(schedule, "am"))
+    total_pm = len(db.days_with(schedule, "pm"))
+    idle = len(db.rest_days(schedule))
+    lines += [
+        "",
+        f"<i>За неделю: основных {total_am}, коротких {total_pm}, "
+        f"выходных {idle}.</i>",
+    ]
+    if not db.training_days(schedule):
+        lines += ["", "<i>Сейчас пусто. Напоминаний о тренировках не будет, "
+                      "серия стоит на месте.</i>"]
+    else:
+        lines += ["", "<i>Серия тренировок считается только по этим дням — "
+                      "выходной её не рвёт.</i>"]
+    return "\n".join(lines)
+
+
+async def show_schedule(message: Message, conn, tg_id: int,
+                        edit: bool = False) -> None:
+    row = await db.get_user(conn, tg_id)
+    if not row or not row["kcal"]:
+        await message.answer("Сначала регистрация. Жми /start.")
+        return
+    schedule = db.user_schedule(row)
+    text = schedule_text(schedule)
+    markup = keyboards.schedule_menu(schedule)
+    if edit:
+        await message.edit_text(text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "sched:menu")
+async def schedule_open(call: CallbackQuery, conn) -> None:
+    await show_schedule(call.message, conn, call.from_user.id, edit=True)
+    await call.answer()
+
+
+@router.message(Command("days"))
+async def schedule_cmd(message: Message, conn) -> None:
+    await show_schedule(message, conn, message.from_user.id)
+
+
+@router.callback_query(F.data.startswith("sched:t:"))
+async def schedule_toggle(call: CallbackQuery, conn, runner) -> None:
+    _, _, day, slot = call.data.split(":")
+    await db.toggle_slot(conn, call.from_user.id, int(day), slot)
+    await runner.reschedule(call.from_user.id)
+    await show_schedule(call.message, conn, call.from_user.id, edit=True)
+    await call.answer()
+
+
+@router.callback_query(F.data.in_({"sched:all", "sched:weekdays", "sched:none"}))
+async def schedule_preset(call: CallbackQuery, conn, runner) -> None:
+    preset = call.data.split(":")[1]
+    if preset == "all":
+        schedule = db.default_schedule()
+    elif preset == "weekdays":
+        schedule = {d: {"am": d < 5, "pm": d < 5} for d in range(7)}
+    else:
+        schedule = {d: {"am": False, "pm": False} for d in range(7)}
+    await db.save_schedule(conn, call.from_user.id, schedule)
+    await runner.reschedule(call.from_user.id)
+    await show_schedule(call.message, conn, call.from_user.id, edit=True)
     await call.answer()
 
 
@@ -696,7 +789,11 @@ async def help_cmd(message: Message) -> None:
         "• <b>Сегодня</b> — сводка по калориям, БЖУ и воде\n"
         "• <b>Вода</b> — добавить выпитое\n"
         "• <b>Вес</b> — прислать число, посмотреть путь к цели\n"
-        "• <b>Ещё</b> — достижения, профиль, план на неделю, напоминания, тренер\n\n"
+        "• <b>Ещё</b> — достижения, профиль, дни тренировок, план на неделю, "
+        "напоминания, тренер\n\n"
+        "Дни тренировок настраиваются как удобно: в один день основная плюс "
+        "короткий блок, в другой только короткий, в третий выходной. "
+        "Серия считается только по выбранным дням.\n\n"
         "Достижения растут ступенями: взял 7 дней подряд — значок повысился, "
         "планка сдвинулась на 14, и семь уже в зачёте.\n\n"
         "В профиле правится любое поле: рост, вес, возраст, пол, образ жизни, "
