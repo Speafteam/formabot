@@ -320,6 +320,40 @@ check("в строке прогресса есть полоса", "▰" in line 
 check("поздравление называет уровень",
       "уровень 2" in ach.congratulation(fire, 2, 7), True)
 
+print("\n--- цены на услуги ---")
+from bot.config import (  # noqa: E402
+    PERIODS, SERVICES, money, period_label, price_for)
+
+check("услуг три", len(SERVICES), 3)
+check("консультация бесплатна", SERVICES["consult"]["price_month"], 0)
+check("у консультации нет сроков", SERVICES["consult"]["periods"], False)
+check("ведение 5000", SERVICES["coaching"]["price_month"], 5000)
+check("ведение с питанием 7000", SERVICES["coaching_plus"]["price_month"], 7000)
+
+print("     ведение онлайн:")
+for months, want_total, want_disc in ((1, 5000, 0), (3, 13500, 10),
+                                      (6, 25500, 15), (12, 45000, 25)):
+    p = price_for("coaching", months)
+    print(f"       {period_label(months):10} {money(p['total']):>10}"
+          f"   скидка {p['discount']}%   экономия {money(p['saved'])}")
+    check(f"  {months} мес — сумма", p["total"], want_total)
+    check(f"  {months} мес — скидка", p["discount"], want_disc)
+
+print("     ведение с питанием:")
+for months, want_total in ((1, 7000), (3, 18900), (6, 35700), (12, 63000)):
+    p = price_for("coaching_plus", months)
+    print(f"       {period_label(months):10} {money(p['total']):>10}"
+          f"   экономия {money(p['saved'])}")
+    check(f"  {months} мес — сумма", p["total"], want_total)
+
+check("скидки заданы для всех сроков", len(PERIODS), 4)
+check("пакет всегда выгоднее помесячной оплаты",
+      all(price_for("coaching", m)["per_month"] < 5000
+          for m, d in PERIODS if d), True)
+check("формат денег", money(45000), "45 000 ₽")
+check("склонение месяцев", period_label(3), "3 месяца")
+check("год словом", period_label(12), "год")
+
 print("\n--- свой набор обращений ---")
 base = banter.defaults("male", "gain")
 check("без правок набор стандартный",

@@ -10,7 +10,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from .. import achievements, banter, calc, db, keyboards, programs
-from ..config import ADMIN_ID, TARIFFS, TIME_LABELS
+from ..config import (
+    ADMIN_ID,
+    SERVICES,
+    TIME_LABELS,
+    money,
+    period_label,
+    price_for,
+)
 from ..parsing import float_value, int_value, time_value, weight_value
 
 log = logging.getLogger(__name__)
@@ -26,6 +33,7 @@ class Ask(StatesGroup):
     edit_weight = State()
     edit_age = State()
     new_nickname = State()
+    lead_comment = State()
 
 
 async def apply_norms(conn, tg_id: int) -> tuple[int, int]:
@@ -703,79 +711,180 @@ COACH_TEXT = (
     "Я веду по программе и считаю цифры. Но я не вижу, как ты приседаешь.\n\n"
     "Человек видит. Смотрит твоё видео, правит технику, вытаскивает "
     "из плато — там, где бот уже бессилен.\n\n"
-    "Нужен такой — выбирай формат. Свяжемся и подберём под твою цель.\n\n"
-    "<i>Оплата напрямую с тренером, после знакомства. Сначала смотришь, "
-    "потом решаешь.</i>"
+    "Начать можно с бесплатной консультации — ни к чему не обязывает."
 )
+
+USERNAME_WARNING = (
+    "⚠️ <b>Важно.</b> Мы передадим тренеру твой ник в Telegram — он напишет "
+    "тебе сам. Больше ничего личного не уходит."
+)
+
+
+def service_card(key: str, months: int = 0) -> str:
+    s = SERVICES[key]
+    lines = [f"<b>{s['title']}</b>", ""]
+
+    if not s["price_month"]:
+        lines.insert(1, "Бесплатно.")
+    elif months:
+        p = price_for(key, months)
+        lines.insert(1, f"{period_label(months).capitalize()} — "
+                        f"<b>{money(p['total'])}</b>")
+        if p["discount"]:
+            lines.insert(2, f"<s>{money(p['full'])}</s> · скидка {p['discount']}% · "
+                            f"экономия {money(p['saved'])}")
+            lines.insert(3, f"Выходит {money(p['per_month'])} в месяц.")
+    lines += [s["about"], ""]
+    lines.append("Оставишь заявку — тренер получит её вместе с твоей целью, "
+                 "весом и нормой. Не придётся объяснять всё заново.")
+    lines += ["", USERNAME_WARNING]
+    return "\n".join(lines)
 
 
 @router.message(F.text == "Тренер")
 async def coach_menu(message: Message) -> None:
-    await message.answer(COACH_TEXT, reply_markup=keyboards.tariffs())
+    await message.answer(COACH_TEXT, reply_markup=keyboards.services())
 
 
 @router.callback_query(F.data == "coach:back")
 async def coach_back(call: CallbackQuery) -> None:
+    await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.services())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("coach:period:"))
+async def coach_period(call: CallbackQuery) -> None:
+    _, _, key, months = call.data.split(":")
     await call.message.edit_text(
-        "Выбирай формат:", reply_markup=keyboards.tariffs()
+        service_card(key, int(months)),
+        reply_markup=keyboards.confirm_lead(key, int(months)),
     )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("coach:note:"))
+async def coach_note(call: CallbackQuery, state: FSMContext) -> None:
+    _, _, key, months = call.data.split(":")
+    await state.set_state(Ask.lead_comment)
+    await state.update_data(lead_key=key, lead_months=int(months))
+    await call.message.answer(
+        "Что передать тренеру? Напиши одним сообщением.\n\n"
+        "Например: травма колена, работаю по сменам, хочу к лету "
+        "сбросить десятку.",
+        reply_markup=keyboards.SKIP_COMMENT,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "coach:nonote")
+async def coach_nonote(call: CallbackQuery, state: FSMContext, conn,
+                       bot: Bot) -> None:
+    data = await state.get_data()
+    await state.clear()
+    await send_lead(call.message, call.from_user, conn, bot,
+                    data.get("lead_key", "consult"),
+                    data.get("lead_months", 0), None)
+    await call.answer()
+
+
+@router.message(Ask.lead_comment)
+async def coach_comment(message: Message, state: FSMContext, conn,
+                        bot: Bot) -> None:
+    data = await state.get_data()
+    await state.clear()
+    comment = (message.text or "").strip()[:600]
+    await send_lead(message, message.from_user, conn, bot,
+                    data.get("lead_key", "consult"),
+                    data.get("lead_months", 0), comment or None)
 
 
 @router.callback_query(F.data.startswith("coach:send:"))
 async def coach_send(call: CallbackQuery, conn, bot: Bot) -> None:
-    key = call.data.split(":")[2]
-    tariff = TARIFFS.get(key)
-    if not tariff:
-        await call.answer("Такого тарифа нет.", show_alert=True)
+    parts = call.data.split(":")
+    key, months = parts[2], int(parts[3]) if len(parts) > 3 else 0
+    await send_lead(call.message, call.from_user, conn, bot, key, months, None)
+    await call.answer()
+
+
+async def send_lead(message: Message, user, conn, bot: Bot, key: str,
+                    months: int, comment: str | None) -> None:
+    service = SERVICES.get(key)
+    if not service:
+        await message.answer("Такой услуги нет.")
         return
 
-    user = call.from_user
-    contact = f"@{user.username}" if user.username else f"id{user.id}"
-    await db.add_lead(conn, user.id, user.username, key, contact)
+    # Тренер пишет первым, а по числовому id написать нельзя — нужен ник.
+    if not user.username:
+        await message.answer(
+            "У тебя не установлен ник в Telegram, а тренер пишет первым — "
+            "без ника он до тебя не достучится.\n\n"
+            "Настройки → Изменить профиль → Имя пользователя. "
+            "Поставь и возвращайся."
+        )
+        return
+
+    price = price_for(key, months)["total"] if months else 0
+    contact = f"@{user.username}"
+    await db.add_lead(conn, user.id, user.username, key, contact,
+                      months or None, price or None, comment)
 
     row = await db.get_user(conn, user.id)
     if ADMIN_ID:
         goal = calc.GOAL_LABELS.get(row["goal"] if row else "", "не указана")
-        details = (
-            f"<b>Заявка на тренера</b>\n\n"
-            f"Тариф: {tariff['title']} — {tariff['price']}\n"
-            f"Клиент: {contact} ({user.full_name})\n"
-        )
+        what = service["title"]
+        if months:
+            what += f", {period_label(months)} — {money(price)}"
+        else:
+            what += " — бесплатно"
+        details = [
+            "<b>Заявка на тренера</b>", "",
+            f"Услуга: {what}",
+            f"Клиент: {contact} ({user.full_name})",
+        ]
         if row and row["kcal"]:
-            details += (
-                f"Цель: {goal}\n"
+            details += [
+                f"Цель: {goal}",
                 f"Вес: {row['weight_kg']:g} кг"
-                + (f", цель {row['target_kg']:g} кг" if row["target_kg"] else "")
-                + f"\nРост: {row['height_cm']:g} см, возраст: {row['age']}\n"
-                f"Норма: {row['kcal']} ккал"
-            )
+                + (f", цель {row['target_kg']:g} кг" if row["target_kg"] else ""),
+                f"Рост: {row['height_cm']:g} см, возраст: {row['age']}",
+                f"Норма: {row['kcal']} ккал",
+            ]
+        if comment:
+            details += ["", f"<b>Комментарий:</b>\n{comment}"]
         try:
-            await bot.send_message(ADMIN_ID, details)
+            await bot.send_message(ADMIN_ID, "\n".join(details))
         except Exception:
             log.exception("Не смог отправить заявку админу")
 
-    await call.message.edit_text(
-        f"Принял: <b>{tariff['title']}</b>.\n\n"
-        "Напишем в течение дня и подберём тренера под твою цель. "
-        "Отвечать будешь прямо здесь, в Telegram."
+    tail = "Консультация бесплатная, ни к чему не обязывает." if not months else (
+        f"{period_label(months).capitalize()} — {money(price)}. "
+        "Оплата обсуждается с тренером.")
+    await message.answer(
+        f"Принял: <b>{service['title']}</b>.\n\n"
+        f"Передали тренеру твой ник {contact} — он напишет сам, "
+        f"обычно в течение дня.\n\n{tail}"
     )
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("coach:"))
 async def coach_details(call: CallbackQuery) -> None:
     key = call.data.split(":")[1]
-    tariff = TARIFFS.get(key)
-    if not tariff:
+    service = SERVICES.get(key)
+    if not service:
         await call.answer()
         return
-    await call.message.edit_text(
-        f"<b>{tariff['title']}</b> — {tariff['price']}\n\n{tariff['about']}\n\n"
-        "Оставишь заявку — тренер получит её вместе с твоей целью, весом и нормой. "
-        "Не придётся объяснять всё заново.",
-        reply_markup=keyboards.confirm_lead(key),
-    )
+
+    if service["periods"]:
+        await call.message.edit_text(
+            f"<b>{service['title']}</b> — {money(service['price_month'])} в месяц\n\n"
+            f"{service['about']}\n\n"
+            "Берёшь пакетом — выходит дешевле. Выбирай срок:",
+            reply_markup=keyboards.periods_menu(key),
+        )
+    else:
+        await call.message.edit_text(
+            service_card(key), reply_markup=keyboards.confirm_lead(key)
+        )
     await call.answer()
 
 

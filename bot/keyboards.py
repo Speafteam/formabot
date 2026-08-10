@@ -7,7 +7,14 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from .config import TARIFFS, TIME_LABELS
+from .config import (
+    PERIODS,
+    SERVICES,
+    TIME_LABELS,
+    money,
+    period_label,
+    price_for,
+)
 from .calc import ACTIVITY_LABELS, GOAL_LABELS
 from .programs import PLACES, KINDS
 
@@ -152,18 +159,37 @@ def set_actions(timed: bool) -> InlineKeyboardMarkup:
 REST_ACTIONS = inline([("Отдохнул, дальше", "w:skip_rest")])
 
 
-def tariffs() -> InlineKeyboardMarkup:
-    pairs = [
-        (f"{t['title']} — {t['price']}", f"coach:{key}")
-        for key, t in TARIFFS.items()
-    ]
+def services() -> InlineKeyboardMarkup:
+    pairs = []
+    for key, s in SERVICES.items():
+        tag = "бесплатно" if not s["price_month"] else (
+            money(s["price_month"]) + " / мес")
+        pairs.append((f"{s['title']} — {tag}", f"coach:{key}"))
     return inline(pairs)
 
 
-def confirm_lead(key: str) -> InlineKeyboardMarkup:
-    return inline(
-        [("Оставить заявку", f"coach:send:{key}"), ("Назад к тарифам", "coach:back")]
-    )
+def periods_menu(key: str) -> InlineKeyboardMarkup:
+    """Сроки со скидками. Экономия видна прямо на кнопке."""
+    pairs = []
+    for months, discount in PERIODS:
+        p = price_for(key, months)
+        label = f"{period_label(months)} — {money(p['total'])}"
+        if discount:
+            label += f"  −{discount}%"
+        pairs.append((label, f"coach:period:{key}:{months}"))
+    pairs.append(("Назад", "coach:back"))
+    return inline(pairs)
+
+
+def confirm_lead(key: str, months: int = 0) -> InlineKeyboardMarkup:
+    return inline([
+        ("Оставить заявку", f"coach:send:{key}:{months}"),
+        ("Добавить комментарий", f"coach:note:{key}:{months}"),
+        ("Назад", "coach:back"),
+    ])
+
+
+SKIP_COMMENT = inline([("Без комментария", "coach:nonote")])
 
 
 def times_menu(times: dict) -> InlineKeyboardMarkup:

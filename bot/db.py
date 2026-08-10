@@ -119,13 +119,16 @@ CREATE TABLE IF NOT EXISTS achievements (
 
 -- Заявки на работу с живым тренером.
 CREATE TABLE IF NOT EXISTS leads (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    tg_id      INTEGER NOT NULL,
-    username   TEXT,
-    tariff     TEXT,
-    contact    TEXT,
-    status     TEXT DEFAULT 'new',
-    created_at TEXT
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id         INTEGER NOT NULL,
+    username      TEXT,
+    tariff        TEXT,
+    contact       TEXT,
+    period_months INTEGER,
+    price         INTEGER,
+    comment       TEXT,
+    status        TEXT DEFAULT 'new',
+    created_at    TEXT
 );
 """
 
@@ -151,14 +154,26 @@ async def init(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
+ADDED_COLUMNS = {
+    "users": (
+        ("pref_place", "TEXT"), ("pref_kind", "TEXT"),
+        ("nicknames_json", "TEXT"), ("schedule_json", "TEXT"),
+    ),
+    "leads": (
+        ("period_months", "INTEGER"), ("price", "INTEGER"), ("comment", "TEXT"),
+    ),
+}
+
+
 async def _migrate(conn: aiosqlite.Connection) -> None:
     """Догоняет схему у баз, созданных прошлыми версиями бота."""
-    cur = await conn.execute("PRAGMA table_info(users)")
-    present = {row["name"] for row in await cur.fetchall()}
-    for column, decl in (("pref_place", "TEXT"), ("pref_kind", "TEXT"),
-                         ("nicknames_json", "TEXT"), ("schedule_json", "TEXT")):
-        if column not in present:
-            await conn.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
+    for table, columns in ADDED_COLUMNS.items():
+        cur = await conn.execute(f"PRAGMA table_info({table})")
+        present = {row["name"] for row in await cur.fetchall()}
+        for column, decl in columns:
+            if column not in present:
+                await conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # ---------- пользователи ----------
@@ -589,11 +604,13 @@ async def unlock(conn, tg_id: int, code: str, tier: int) -> None:
 
 # ---------- заявки на тренера ----------
 
-async def add_lead(conn, tg_id, username, tariff, contact) -> int:
+async def add_lead(conn, tg_id, username, tariff, contact,
+                   months=None, price=None, comment=None) -> int:
     cur = await conn.execute(
-        "INSERT INTO leads (tg_id, username, tariff, contact, created_at)"
-        " VALUES (?,?,?,?,?)",
-        (tg_id, username, tariff, contact, now().isoformat()),
+        "INSERT INTO leads (tg_id, username, tariff, contact, period_months,"
+        " price, comment, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (tg_id, username, tariff, contact, months, price, comment,
+         now().isoformat()),
     )
     await conn.commit()
     return cur.lastrowid
