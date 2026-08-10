@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from .. import banter, calc, db, keyboards, programs
+from .. import achievements, banter, calc, db, keyboards, programs
 from ..config import ADMIN_ID, TARIFFS, TIME_LABELS
 from ..parsing import float_value, int_value, time_value, weight_value
 
@@ -71,7 +71,7 @@ async def water_menu(message: Message, conn) -> None:
 
 
 @router.callback_query(F.data.startswith("water:"))
-async def water_add(call: CallbackQuery, conn, state: FSMContext) -> None:
+async def water_add(call: CallbackQuery, conn, state: FSMContext, bot: Bot) -> None:
     value = call.data.split(":")[1]
     if value == "custom":
         await state.set_state(Ask.water_ml)
@@ -85,6 +85,7 @@ async def water_add(call: CallbackQuery, conn, state: FSMContext) -> None:
         await water_text(conn, row), reply_markup=keyboards.WATER
     )
     await call.answer(f"Записал {value} мл")
+    await achievements.notify(bot, conn, call.from_user.id)
 
 
 @router.message(Ask.water_ml)
@@ -147,7 +148,7 @@ async def weight_menu(message: Message, conn) -> None:
     StateFilter(None),
     F.text.func(lambda t: bool(t) and weight_value(t) is not None),
 )
-async def weight_entry(message: Message, conn, runner) -> None:
+async def weight_entry(message: Message, conn, runner, bot: Bot) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
         await message.answer("Сначала регистрация. Жми /start.")
@@ -175,6 +176,7 @@ async def weight_entry(message: Message, conn, runner) -> None:
         parts += ["", f"Норму пересчитал: <b>{norms.kcal} ккал</b>, "
                       f"белка {norms.protein} г."]
     await message.answer("\n".join(parts))
+    await achievements.notify(bot, conn, message.from_user.id)
 
 
 # ---------- «Ещё», профиль и план на неделю ----------
@@ -278,6 +280,54 @@ async def times_open(call: CallbackQuery, conn) -> None:
 async def coach_open(call: CallbackQuery) -> None:
     await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.tariffs())
     await call.answer()
+
+
+# ---------- достижения ----------
+
+@router.message(F.text == "Достижения")
+@router.message(Command("achievements"))
+async def achievements_cmd(message: Message, conn) -> None:
+    await show_achievements(message, conn, message.from_user.id)
+
+
+@router.callback_query(F.data == "more:achievements")
+async def achievements_open(call: CallbackQuery, conn) -> None:
+    await show_achievements(call.message, conn, call.from_user.id, edit=True)
+    await call.answer()
+
+
+async def show_achievements(message: Message, conn, tg_id: int,
+                            edit: bool = False) -> None:
+    row = await db.get_user(conn, tg_id)
+    if not row or not row["kcal"]:
+        await message.answer("Сначала регистрация. Жми /start.")
+        return
+
+    values = await achievements.values_for(conn, row)
+    taken = sum(a.tier_of(values.get(a.code, 0)) for a in achievements.ALL)
+    total = sum(a.max_tier() for a in achievements.ALL)
+
+    lines = [f"<b>Достижения</b> — {taken} из {total}", ""]
+
+    # Сначала то, что уже идёт: по нему приятнее смотреть прогресс.
+    started = [a for a in achievements.ALL if values.get(a.code, 0) > 0]
+    untouched = [a for a in achievements.ALL if values.get(a.code, 0) == 0]
+
+    for a in started:
+        lines.append(achievements.progress_line(a, values.get(a.code, 0)))
+    if untouched:
+        lines += ["", "<i>Ещё не начато</i>"]
+        for a in untouched:
+            lines.append(f"⚪ {a.icon} <b>{a.title}</b>\n     {a.hint}")
+
+    lines += ["", "<i>Один пропущенный день на неделю серия прощает. "
+                  "Два подряд — начинаем сначала.</i>"]
+
+    text = "\n".join(lines)
+    if edit:
+        await message.edit_text(text, reply_markup=keyboards.MORE)
+    else:
+        await message.answer(text)
 
 
 # ---------- свой набор обращений ----------
@@ -646,7 +696,9 @@ async def help_cmd(message: Message) -> None:
         "• <b>Сегодня</b> — сводка по калориям, БЖУ и воде\n"
         "• <b>Вода</b> — добавить выпитое\n"
         "• <b>Вес</b> — прислать число, посмотреть путь к цели\n"
-        "• <b>Ещё</b> — профиль, план на неделю, напоминания, тренер\n\n"
+        "• <b>Ещё</b> — достижения, профиль, план на неделю, напоминания, тренер\n\n"
+        "Достижения растут ступенями: взял 7 дней подряд — значок повысился, "
+        "планка сдвинулась на 14, и семь уже в зачёте.\n\n"
         "В профиле правится любое поле: рост, вес, возраст, пол, образ жизни, "
         "цель, место тренировок. Норму пересчитываю сразу.\n\n"
         "Не нравится, как я тебя зову? «Ещё» → «Как ко мне обращаться». "

@@ -147,6 +147,77 @@ for sex in ("male", "female"):
                 print(f"FAIL строчная буква в начале: {text}")
 print("ok   фразы начинаются с заглавной")
 
+print("\n--- серии с прощением пропуска ---")
+from bot import achievements as ach  # noqa: E402
+from datetime import date as _d, timedelta as _td  # noqa: E402
+
+TODAY = _d(2026, 8, 10)
+
+
+def days_ago(*offsets):
+    """Список дат по числу дней назад от опорной даты."""
+    return sorted((TODAY - _td(days=o)).isoformat() for o in offsets)
+
+
+check("пустая история — нуль", ach.streak([], TODAY), 0)
+check("только сегодня", ach.streak(days_ago(0), TODAY), 1)
+check("три дня подряд", ach.streak(days_ago(0, 1, 2), TODAY), 3)
+# Сегодня ещё идёт: его отсутствие серию не рвёт.
+check("вчера и позавчера, сегодня пусто",
+      ach.streak(days_ago(1, 2, 3), TODAY), 3)
+# Один пропуск внутри серии прощается.
+check("пропуск на третий день прощён",
+      ach.streak(days_ago(1, 2, 4, 5), TODAY), 4)
+# Два пропуска подряд рвут серию.
+check("два пропуска подряд рвут",
+      ach.streak(days_ago(1, 2, 5, 6), TODAY), 2)
+# Второй пропуск раньше чем через 7 дней тоже рвёт.
+check("два прощения в одном окне не дадим",
+      ach.streak(days_ago(1, 3, 5, 7), TODAY), 2)
+# А вот через восемь дней прощение снова доступно.
+check("прощение обновляется через неделю",
+      ach.streak(days_ago(1, 2, 3, 4, 5, 6, 7, 8, 10), TODAY), 9)
+
+print("     недельные серии:")
+check("нет взвешиваний", ach.week_streak([], TODAY), 0)
+check("три недели подряд",
+      ach.week_streak(days_ago(0, 7, 14), TODAY), 3)
+# Текущая неделя может быть ещё не закрыта — отсчёт идёт от прошлой.
+check("текущая неделя пуста, прошлые есть",
+      ach.week_streak(days_ago(7, 14, 21), TODAY), 3)
+check("разрыв в неделях",
+      ach.week_streak(days_ago(0, 7, 21), TODAY), 2)
+
+print("\n--- ступени достижений ---")
+fire = ach.BY_CODE["workout_streak"]
+check("ноль — ступеней нет", fire.tier_of(0), 0)
+check("шесть дней — первая ступень", fire.tier_of(6), 1)
+check("семь дней — вторая", fire.tier_of(7), 2)
+check("сто дней — все ступени", fire.tier_of(100), fire.max_tier())
+check("следующая планка после 7", fire.next_target(7), 14)
+check("выше потолка планки нет", fire.next_target(100), None)
+check("прогресс не обнуляется",
+      fire.tier_of(14) > fire.tier_of(13), True)
+
+check("проценты к цели", ach.goal_percent(88, 83, 78), 50)
+check("цель достигнута", ach.goal_percent(88, 78, 78), 100)
+check("ушли ниже цели — не больше ста", ach.goal_percent(88, 70, 78), 100)
+check("без цели — ноль", ach.goal_percent(88, 85, None), 0)
+
+for a in ach.ALL:
+    if list(a.tiers) != sorted(a.tiers):
+        ok = False
+        print(f"FAIL ступени не по возрастанию: {a.code}")
+    if len(a.tiers) > len(ach.TIER_ICONS):
+        ok = False
+        print(f"FAIL ступеней больше, чем значков: {a.code}")
+print(f"ok   достижений {len(ach.ALL)}, "
+      f"всего ступеней {sum(a.max_tier() for a in ach.ALL)}")
+line = ach.progress_line(fire, 5)
+check("в строке прогресса есть полоса", "▰" in line or "▱" in line, True)
+check("поздравление называет уровень",
+      "уровень 2" in ach.congratulation(fire, 2, 7), True)
+
 print("\n--- свой набор обращений ---")
 base = banter.defaults("male", "gain")
 check("без правок набор стандартный",
@@ -307,6 +378,40 @@ async def db_check():
     prefs = m.user_nicknames(await m.get_user(conn, 1))
     check("сброс чистит всё", prefs, {"banned": [], "custom": []})
 
+    print("     тренировки и достижения:")
+    await m.log_workout(conn, 1, "am", "gym", "strength", 112)
+    await m.log_workout(conn, 1, "pm", "home", "cardio", 25)
+    counts = await m.counters(conn, 1)
+    check("тренировки посчитаны", counts["workouts"], 2)
+    check("минуты сложены", counts["minutes"], 137)
+    check("места посчитаны", counts["places"], 2)
+    check("дней с тренировкой один", len(await m.workout_days(conn, 1)), 1)
+
+    # Белковый день засчитывается от 90% нормы, не раньше.
+    await m.add_meal(conn, 1, "творог", 200, 200, 36.0, 2.0, 6.0)
+    days = await m.protein_days(conn, 1, 40)
+    check("белок 42 из 40 — день в зачёте", len(days), 1)
+    days = await m.protein_days(conn, 1, 200)
+    check("белок 42 из 200 — не в зачёте", len(days), 0)
+
+    await m.add_water(conn, 1, 2500)
+    check("день воды в зачёте", len(await m.water_days(conn, 1, 3000)), 1)
+    check("день воды не добран", len(await m.water_days(conn, 1, 5000)), 0)
+
+    check("взятых ступеней пока нет", await m.unlocked(conn, 1), {})
+    await m.unlock(conn, 1, "workout_streak", 1)
+    await m.unlock(conn, 1, "workout_streak", 1)   # повтор не должен дублировать
+    await m.unlock(conn, 1, "workout_streak", 2)
+    check("держим наивысшую ступень",
+          (await m.unlocked(conn, 1))["workout_streak"], 2)
+
+    # Сквозной сценарий: check находит новые ступени и не выдаёт их дважды.
+    row = await m.get_user(conn, 1)
+    fresh = await ach.check(conn, row)
+    codes = {a.code for a, _, _ in fresh}
+    check("новые ступени найдены", bool(codes), True)
+    check("повторно те же не выдаются", await ach.check(conn, row), [])
+
     await m.add_lead(conn, 1, "anatoly", "coaching", "@anatoly")
     cur = await conn.execute("SELECT COUNT(*) c FROM leads")
     check("заявка записана", (await cur.fetchone())["c"], 1)
@@ -337,6 +442,11 @@ async def migration_check():
     check("колонка pref_place добавлена", "pref_place" in columns, True)
     check("колонка pref_kind добавлена", "pref_kind" in columns, True)
     check("колонка nicknames_json добавлена", "nicknames_json" in columns, True)
+
+    cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = {r["name"] for r in await cur.fetchall()}
+    check("таблица workouts создана", "workouts" in tables, True)
+    check("таблица achievements создана", "achievements" in tables, True)
     cur = await conn.execute("SELECT kcal FROM users WHERE tg_id = 1")
     check("старые данные на месте", (await cur.fetchone())["kcal"], 2300)
 

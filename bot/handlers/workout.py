@@ -6,7 +6,7 @@ from datetime import date
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, Message
 
-from .. import db, keyboards, programs
+from .. import achievements, db, keyboards, programs
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -234,6 +234,14 @@ async def finish_workout(bot: Bot, conn, tg_id: int) -> None:
     session = await db.get_session(conn, tg_id)
     title = session["program"]["title"] if session else "Тренировка"
     minutes = session["program"]["minutes"] if session else 0
+
+    # Записываем факт тренировки: на этом строятся серии и достижения.
+    if session:
+        await db.log_workout(
+            conn, tg_id, session["slot"], session["place"], session["kind"],
+            minutes,
+        )
+
     await db.cancel_timers(conn, tg_id)
     await db.end_session(conn, tg_id)
     await bot.send_message(
@@ -242,3 +250,4 @@ async def finish_workout(bot: Bot, conn, tg_id: int) -> None:
         "Теперь вода и белок в ближайший приём пищи. Иначе всё это впустую.",
         reply_markup=keyboards.MAIN_MENU,
     )
+    await achievements.notify(bot, conn, tg_id)

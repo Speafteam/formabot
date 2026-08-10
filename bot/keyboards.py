@@ -39,6 +39,7 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 MORE = inline(
     [
+        ("🏆 Достижения", "more:achievements"),
         ("Профиль", "more:profile"),
         ("План на неделю", "more:plan"),
         ("Напоминания", "more:times"),

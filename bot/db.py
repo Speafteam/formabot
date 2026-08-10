@@ -92,6 +92,30 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at  TEXT
 );
 
+-- Завершённые тренировки. Без этой таблицы серии считать не из чего:
+-- запись в sessions удаляется, как только программа закончена.
+CREATE TABLE IF NOT EXISTS workouts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id       INTEGER NOT NULL,
+    day         TEXT NOT NULL,
+    slot        TEXT,
+    place       TEXT,
+    kind        TEXT,
+    minutes     INTEGER,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workouts ON workouts(tg_id, day);
+
+-- Взятые ступени достижений. Строка на каждую ступень, чтобы знать,
+-- что уже показывали, и не поздравлять дважды.
+CREATE TABLE IF NOT EXISTS achievements (
+    tg_id       INTEGER NOT NULL,
+    code        TEXT NOT NULL,
+    tier        INTEGER NOT NULL,
+    unlocked_at TEXT,
+    PRIMARY KEY (tg_id, code, tier)
+);
+
 -- Заявки на работу с живым тренером.
 CREATE TABLE IF NOT EXISTS leads (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -401,6 +425,101 @@ async def pending_timers(conn) -> list[dict]:
         item["payload"] = json.loads(item["payload"]) if item["payload"] else {}
         out.append(item)
     return out
+
+
+# ---------- тренировки и достижения ----------
+
+async def log_workout(conn, tg_id, slot, place, kind, minutes) -> None:
+    await conn.execute(
+        "INSERT INTO workouts (tg_id, day, slot, place, kind, minutes, finished_at)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (tg_id, today(), slot, place, kind, minutes, now().isoformat()),
+    )
+    await conn.commit()
+
+
+async def _days(conn, sql: str, params) -> list[str]:
+    cur = await conn.execute(sql, params)
+    return [r["day"] for r in await cur.fetchall()]
+
+
+async def workout_days(conn, tg_id: int) -> list[str]:
+    return await _days(
+        conn, "SELECT DISTINCT day FROM workouts WHERE tg_id = ? ORDER BY day",
+        (tg_id,))
+
+
+async def meal_days(conn, tg_id: int) -> list[str]:
+    return await _days(
+        conn, "SELECT DISTINCT day FROM meals WHERE tg_id = ? ORDER BY day",
+        (tg_id,))
+
+
+async def protein_days(conn, tg_id: int, target_g: float) -> list[str]:
+    """Дни, когда белок добран хотя бы на 90% нормы."""
+    return await _days(
+        conn,
+        "SELECT day FROM meals WHERE tg_id = ? GROUP BY day"
+        " HAVING SUM(protein) >= ? ORDER BY day",
+        (tg_id, target_g * 0.9),
+    )
+
+
+async def water_days(conn, tg_id: int, target_ml: float) -> list[str]:
+    return await _days(
+        conn,
+        "SELECT day FROM water WHERE tg_id = ? GROUP BY day"
+        " HAVING SUM(ml) >= ? ORDER BY day",
+        (tg_id, target_ml),
+    )
+
+
+async def weigh_days(conn, tg_id: int) -> list[str]:
+    return await _days(
+        conn, "SELECT DISTINCT day FROM weights WHERE tg_id = ? ORDER BY day",
+        (tg_id,))
+
+
+async def counters(conn, tg_id: int) -> dict:
+    """Накопительные показатели: сколько всего сделано за всё время."""
+    cur = await conn.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(minutes),0) m FROM workouts WHERE tg_id = ?",
+        (tg_id,))
+    w = await cur.fetchone()
+    cur = await conn.execute(
+        "SELECT COUNT(*) n FROM meals WHERE tg_id = ?", (tg_id,))
+    meals = (await cur.fetchone())["n"]
+    cur = await conn.execute(
+        "SELECT COALESCE(SUM(ml),0) t FROM water WHERE tg_id = ?", (tg_id,))
+    water = (await cur.fetchone())["t"]
+    cur = await conn.execute(
+        "SELECT COUNT(DISTINCT place) n FROM workouts WHERE tg_id = ?", (tg_id,))
+    places = (await cur.fetchone())["n"]
+    cur = await conn.execute(
+        "SELECT COUNT(*) n FROM workouts WHERE tg_id = ?"
+        " AND CAST(substr(finished_at, 12, 2) AS INTEGER) < 8", (tg_id,))
+    early = (await cur.fetchone())["n"]
+    return {
+        "workouts": w["n"], "minutes": w["m"], "meals": meals,
+        "water_ml": water, "places": places, "early": early,
+    }
+
+
+async def unlocked(conn, tg_id: int) -> dict[str, int]:
+    """Наивысшая взятая ступень по каждому достижению."""
+    cur = await conn.execute(
+        "SELECT code, MAX(tier) t FROM achievements WHERE tg_id = ? GROUP BY code",
+        (tg_id,))
+    return {r["code"]: r["t"] for r in await cur.fetchall()}
+
+
+async def unlock(conn, tg_id: int, code: str, tier: int) -> None:
+    await conn.execute(
+        "INSERT OR IGNORE INTO achievements (tg_id, code, tier, unlocked_at)"
+        " VALUES (?,?,?,?)",
+        (tg_id, code, tier, now().isoformat()),
+    )
+    await conn.commit()
 
 
 # ---------- заявки на тренера ----------

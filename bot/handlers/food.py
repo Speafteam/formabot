@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, Message
 
-from .. import db, fatsecret, food_ru, keyboards
+from .. import achievements, db, fatsecret, food_ru, keyboards
 from ..parsing import food_line
 
 log = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ async def add_food(message: Message, conn) -> None:
 
 
 @router.callback_query(F.data.startswith("food:"))
-async def pick_food(call: CallbackQuery, conn) -> None:
+async def pick_food(call: CallbackQuery, conn, bot) -> None:
     tg_id = call.from_user.id
     pending = _pending.get(tg_id)
     if not pending:
@@ -141,6 +141,7 @@ async def pick_food(call: CallbackQuery, conn) -> None:
         reply_markup=keyboards.inline([("Убрать запись", "food:undo")]),
     )
     await call.answer()
+    await achievements.notify(bot, conn, tg_id)
 
 
 @router.callback_query(F.data == "food:undo")
