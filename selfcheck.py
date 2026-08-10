@@ -91,6 +91,75 @@ check("есть ссылка на технику",
       programs.build("lose", "gym", "strength", "am")["items"][2]["video"].startswith("http"),
       True)
 
+print("\n--- свойские обращения ---")
+from bot import banter  # noqa: E402
+
+for sex in ("male", "female"):
+    for goal in ("lose", "gain", "stretch", "maintain"):
+        pool = banter.NICKNAMES[(sex, goal)]
+        if len(pool) < 5:
+            ok = False
+            print(f"FAIL мало прозвищ для {sex}/{goal}: {len(pool)}")
+print("ok   прозвища есть для всех восьми пар пол-цель")
+
+# Обращения не должны пересекаться между целями — иначе смысл теряется.
+check("набор и похудение обращаются по-разному",
+      set(banter.GAIN_MALE) & set(banter.LOSE_MALE), set())
+check("«худышка» не попала в словарь",
+      any("худыш" in n for pool in banter.NICKNAMES.values() for n in pool), False)
+
+# Род должен совпадать: женские фразы не говорят «не забыл».
+for _ in range(60):
+    f = banter.water_opener("female", "lose")
+    if "забыл?" in f or "забыл " in f:
+        ok = False
+        print(f"FAIL мужской род в женской фразе: {f}")
+    m = banter.meal_opener("male", "gain", "lunch")
+    if "отложила" in m or "забыла" in m:
+        ok = False
+        print(f"FAIL женский род в мужской фразе: {m}")
+print("ok   род в фразах совпадает с полом")
+
+# Шаблоны должны подставляться полностью, без остатков вида {n}.
+for sex in ("male", "female"):
+    for goal in ("lose", "gain"):
+        for meal in ("breakfast", "lunch", "dinner"):
+            for text in (banter.meal_opener(sex, goal, meal),
+                         banter.water_opener(sex, goal),
+                         banter.protein_nudge(sex, goal)):
+                if "{" in text or "}" in text:
+                    ok = False
+                    print(f"FAIL незакрытый шаблон: {text}")
+print("ok   шаблоны подставляются без остатков")
+
+print(f"     пример мужчина/масса: {banter.meal_opener('male', 'gain', 'lunch')}")
+print(f"     пример женщина/похудение: {banter.water_opener('female', 'lose')}")
+print(f"     пример мужчина/растяжка: {banter.meal_opener('male', 'stretch', 'dinner')}")
+
+# Фразы начинают сообщение, поэтому первая буква должна быть заглавной.
+for sex in ("male", "female"):
+    for goal in ("lose", "gain", "stretch", "maintain"):
+        for text in (banter.meal_opener(sex, goal, "lunch"),
+                     banter.water_opener(sex, goal),
+                     banter.protein_nudge(sex, goal)):
+            if text[0].islower():
+                ok = False
+                print(f"FAIL строчная буква в начале: {text}")
+print("ok   фразы начинаются с заглавной")
+
+print("\n--- дроби не ломают предложения ---")
+check("литры с запятой", banter.litres(3150), "3,1")
+check("целые литры", banter.litres(2000), "2,0")
+check("дробь через запятую", calc.dec(0.588, 2), "0,59")
+
+warn_text = calc.pace_warning(88, 1.5)
+# Главное: точки между предложениями остались точками, а не стали запятыми.
+check("предложение не разорвано", ". Похудеешь" in warn_text, True)
+check("второе предложение цело", ". Растяни срок." in warn_text, True)
+check("дробь в предупреждении с запятой", "1,50" in warn_text, True)
+gain_warn = calc.pace_warning(88, -1.5)
+check("точки во втором предупреждении целы", ". Сбавь темп." in gain_warn, True)
+
 print("\n--- план на неделю ---")
 from datetime import date as _date  # noqa: E402
 week = programs.week_plan("lose", "gym", "strength", _date.today().toordinal())

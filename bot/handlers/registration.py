@@ -275,8 +275,8 @@ async def finish(message: Message, state: FSMContext, conn, runner, tg_id: int) 
         delta = abs(data["weight"] - target_kg)
         text += [
             "",
-            f"Цель: <b>{delta:.1f} кг за {weeks} нед.</b> — "
-            f"{abs(pace):.2f} кг в неделю.".replace(".", ","),
+            f"Цель: <b>{calc.dec(delta)} кг за {weeks} нед.</b> — "
+            f"{calc.dec(abs(pace), 2)} кг в неделю.",
         ]
         warning = calc.pace_warning(data["weight"], pace)
         if warning:

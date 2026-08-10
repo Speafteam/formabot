@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from .. import calc, db, keyboards, programs
+from .. import banter, calc, db, keyboards, programs
 from ..config import ADMIN_ID, TARIFFS, TIME_LABELS
 from ..parsing import float_value, int_value, time_value, weight_value
 
@@ -52,10 +52,12 @@ async def water_text(conn, row) -> str:
     drunk = await db.water_total(conn, row["tg_id"])
     norm = row["water_ml"] or 0
     left = max(norm - drunk, 0)
-    tail = "Норма закрыта. Молодец." if left <= 0 else f"Осталось {left / 1000:.1f} л."
+    tail = ("Норма закрыта. Молодец."
+            if left <= 0 else f"Осталось {banter.litres(left)} л.")
     return (
-        f"Выпито <b>{drunk / 1000:.1f} л</b> из <b>{norm / 1000:.1f} л</b>.\n{tail}"
-    ).replace(".", ",")
+        f"Выпито <b>{banter.litres(drunk)} л</b> из "
+        f"<b>{banter.litres(norm)} л</b>.\n{tail}"
+    )
 
 
 @router.message(F.text == "Вода")
@@ -397,7 +399,7 @@ async def set_weeks(message: Message, state: FSMContext, conn) -> None:
     pace = calc.weekly_pace(row["weight_kg"], data["target_kg"], weeks)
     text = [
         f"Цель обновлена: <b>{data['target_kg']:g} кг</b> за {weeks} нед.",
-        f"Это {abs(pace):.2f} кг в неделю.".replace(".", ","),
+        f"Это {calc.dec(abs(pace), 2)} кг в неделю.",
     ]
     warning = calc.pace_warning(row["weight_kg"], pace)
     if warning:

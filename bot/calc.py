@@ -49,6 +49,15 @@ WATER_ML_PER_KG = 30
 WATER_TRAINING_BONUS_ML = 500
 
 
+def dec(value: float, digits: int = 1) -> str:
+    """Число с запятой в дробной части: 3.15 -> «3,2».
+
+    Форматируем поштучно, а не заменой точек во всей строке: иначе замена
+    портит обычные точки в предложениях вокруг числа.
+    """
+    return f"{value:.{digits}f}".replace(".", ",")
+
+
 @dataclass
 class Norms:
     bmr: int          # базовый обмен
@@ -68,7 +77,7 @@ class Norms:
             f"<b>Белки</b> {self.protein} г\n"
             f"<b>Жиры</b> {self.fat} г\n"
             f"<b>Углеводы</b> {self.carbs} г\n"
-            f"<b>Вода</b> {self.water_ml / 1000:.1f} л".replace(".", ",")
+            f"<b>Вода</b> {dec(self.water_ml / 1000)} л"
         )
 
 
@@ -128,13 +137,14 @@ def pace_warning(current_kg: float, pace_per_week: float) -> str | None:
     limit = current_kg * 0.01
     if pace_per_week > limit:
         return (
-            f"{pace_per_week:.2f} кг в неделю — быстрее безопасного ({limit:.2f} кг).\n"
-            "На таком темпе уходит мышца, а не жир. Похудеешь и будешь выглядеть хуже, "
-            "чем сейчас. Растяни срок."
-        ).replace(".", ",")
+            f"{dec(pace_per_week, 2)} кг в неделю — быстрее безопасного "
+            f"({dec(limit, 2)} кг).\n"
+            "На таком темпе уходит мышца, а не жир. Похудеешь и будешь выглядеть "
+            "хуже, чем сейчас. Растяни срок."
+        )
     if pace_per_week < -limit:
         return (
-            f"{abs(pace_per_week):.2f} кг в неделю — это не масса, это заплыв.\n"
+            f"{dec(abs(pace_per_week), 2)} кг в неделю — это не масса, это заплыв.\n"
             "Большая часть прироста будет жиром. Сбавь темп."
-        ).replace(".", ",")
+        )
     return None

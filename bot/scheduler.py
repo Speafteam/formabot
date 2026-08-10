@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from . import db, keyboards
+from . import banter, db, keyboards
 from .config import (
     REST_SECONDS,
     REST_WARNING_SECONDS,
@@ -133,23 +133,39 @@ class Runner:
             totals = await db.day_totals(self.conn, tg_id)
             left_kcal = max(round(row["kcal"] - totals["kcal"]), 0)
             left_protein = max(round(row["protein"] - totals["protein"]), 0)
-            text = (
-                f"{MEAL_TEXT[key]} Осталось <b>{left_kcal} ккал</b>, "
-                f"белка не хватает <b>{left_protein} г</b>.\n\n"
-                "Мясо, рыба, творог — выбирай. Потом напиши, что съел: "
-                "«гречка 150 г», остальное моё."
-            )
-            return text, None
+
+            opener = banter.meal_opener(row["sex"], row["goal"], key)
+            lines = [opener, ""]
+
+            if left_kcal > 0:
+                lines.append(f"Осталось <b>{left_kcal} ккал</b>.")
+            else:
+                lines.append("Норма по калориям на сегодня уже закрыта.")
+
+            # Подначка про белок — только когда его правда сильно не хватает.
+            if left_protein >= 30:
+                lines.append(
+                    f"{banter.protein_nudge(row['sex'], row['goal'])} "
+                    f"Не добрано <b>{left_protein} г</b>."
+                )
+            elif left_protein > 0:
+                lines.append(f"Белка осталось добрать <b>{left_protein} г</b>.")
+
+            lines += ["", "Поел — напиши: «гречка 150 г», остальное моё."]
+            return "\n".join(lines), None
 
         if key.startswith("water"):
             drunk = await db.water_total(self.conn, tg_id)
             norm = row["water_ml"] or 0
             left = max(norm - drunk, 0)
+            opener = banter.water_opener(row["sex"], row["goal"])
+            tail = ("Норма закрыта, красота."
+                    if left <= 0 else f"Осталось {banter.litres(left)} л.")
             text = (
-                f"Вода: <b>{drunk / 1000:.1f}</b> из <b>{norm / 1000:.1f} л</b>. "
-                f"Осталось {left / 1000:.1f}.\n\n"
-                "Обезвоженная мышца не растёт. Пей."
-            ).replace(".", ",")
+                f"{opener}\n\n"
+                f"Выпито <b>{banter.litres(drunk)}</b> из "
+                f"<b>{banter.litres(norm)} л</b>. {tail}"
+            )
             return text, keyboards.WATER
 
         if key == "weigh_in":
