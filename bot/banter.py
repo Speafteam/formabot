@@ -121,13 +121,51 @@ def litres(ml: float) -> str:
     return dec(ml / 1000)
 
 
-def nickname(sex: str | None, goal: str | None) -> str:
-    """Прозвище под пол и цель. При неизвестных данных — нейтральное."""
+MAX_CUSTOM_LEN = 20
+FALLBACK = "друг"
+
+
+def defaults(sex: str | None, goal: str | None) -> list[str]:
+    """Стандартный набор обращений под пол и цель."""
     key = (sex or "male", goal or "maintain")
     pool = NICKNAMES.get(key)
     if not pool:
         pool = KEEP_FEMALE if sex == "female" else KEEP_MALE
-    return random.choice(pool)
+    return list(pool)
+
+
+def pool_for(sex: str | None, goal: str | None, prefs: dict | None = None) -> list[str]:
+    """Набор обращений с учётом правок пользователя."""
+    prefs = prefs or {}
+    banned = set(prefs.get("banned") or [])
+    custom = list(prefs.get("custom") or [])
+    pool = [n for n in defaults(sex, goal) if n not in banned]
+    # Свои идут следом и не дублируют стандартные.
+    pool += [n for n in custom if n not in pool]
+    return pool or [FALLBACK]
+
+
+def validate_custom(text: str) -> tuple[str | None, str | None]:
+    """Проверяет своё прозвище. Возвращает (прозвище, текст ошибки)."""
+    name = " ".join((text or "").split()).lower()
+    if not name:
+        return None, "Пусто. Напиши слово."
+    if len(name) < 2:
+        return None, "Слишком коротко — минимум две буквы."
+    if len(name) > MAX_CUSTOM_LEN:
+        return None, f"Слишком длинно — не больше {MAX_CUSTOM_LEN} символов."
+    # Угловые скобки и амперсанд сломали бы разметку сообщений.
+    if any(ch in name for ch in "<>&"):
+        return None, "Без символов < > и & — они ломают оформление."
+    allowed = set("абвгдеёжзийклмнопрстуфхцчшщъыьэюяabcdefghijklmnopqrstuvwxyz -")
+    if not set(name) <= allowed:
+        return None, "Только буквы, пробел и дефис."
+    return name, None
+
+
+def nickname(sex: str | None, goal: str | None, prefs: dict | None = None) -> str:
+    """Прозвище под пол, цель и правки пользователя."""
+    return random.choice(pool_for(sex, goal, prefs))
 
 
 def _form(sex: str | None) -> str:
@@ -144,25 +182,28 @@ def _cap(text: str) -> str:
     return text[:1].upper() + text[1:] if text else text
 
 
-def meal_opener(sex: str | None, goal: str | None, meal_key: str) -> str:
+def meal_opener(sex: str | None, goal: str | None, meal_key: str,
+                prefs: dict | None = None) -> str:
     """Шутливый зачин напоминания о еде."""
     meal = MEALS.get(meal_key, MEALS["lunch"])
     template = random.choice(MEAL_OPENERS[_form(sex)])
     return _cap(template.format(
-        n=nickname(sex, goal),
+        n=nickname(sex, goal, prefs),
         meal=meal["nom"],
         meal_gen=meal["gen"],
         meal_acc=meal["acc"],
     ))
 
 
-def water_opener(sex: str | None, goal: str | None) -> str:
+def water_opener(sex: str | None, goal: str | None,
+                 prefs: dict | None = None) -> str:
     """Шутливый зачин напоминания о воде."""
     return _cap(random.choice(WATER_OPENERS[_form(sex)]).format(
-        n=nickname(sex, goal)))
+        n=nickname(sex, goal, prefs)))
 
 
-def protein_nudge(sex: str | None, goal: str | None) -> str:
+def protein_nudge(sex: str | None, goal: str | None,
+                  prefs: dict | None = None) -> str:
     """Подначка, когда белка сильно не хватает."""
     return _cap(random.choice(PROTEIN_NUDGE[_form(sex)]).format(
-        n=nickname(sex, goal)))
+        n=nickname(sex, goal, prefs)))

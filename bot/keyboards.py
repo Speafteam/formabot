@@ -42,9 +42,23 @@ MORE = inline(
         ("Профиль", "more:profile"),
         ("План на неделю", "more:plan"),
         ("Напоминания", "more:times"),
+        ("Как ко мне обращаться", "nick:menu"),
         ("Живой тренер", "more:coach"),
     ]
 )
+
+
+def nicknames_menu(pool: list[str], custom: list[str],
+                   has_changes: bool) -> InlineKeyboardMarkup:
+    """Список обращений: нажатие на строку убирает её из набора."""
+    pairs = [
+        (f"✕  {name}" + ("  ·  своё" if name in custom else ""), f"nick:del:{name}")
+        for name in pool
+    ]
+    pairs.append(("➕ Добавить своё", "nick:add"))
+    if has_changes:
+        pairs.append(("↩️ Вернуть стандартные", "nick:reset"))
+    return inline(pairs)
 
 SEX = inline([("Мужской", "reg:sex:male"), ("Женский", "reg:sex:female")], per_row=2)
 
@@ -123,6 +137,7 @@ PROFILE_EDIT = inline(
         ("Цель занятий", "edit:goal"),
         ("Цель по весу и срок", "prof:target"),
         ("Место тренировок", "edit:place"),
+        ("Как ко мне обращаться", "nick:menu"),
         ("Начать всё заново", "prof:redo"),
     ],
     per_row=2,

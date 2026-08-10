@@ -147,6 +147,44 @@ for sex in ("male", "female"):
                 print(f"FAIL строчная буква в начале: {text}")
 print("ok   фразы начинаются с заглавной")
 
+print("\n--- свой набор обращений ---")
+base = banter.defaults("male", "gain")
+check("без правок набор стандартный",
+      banter.pool_for("male", "gain", {"banned": [], "custom": []}), base)
+check("убранное исчезает",
+      base[0] in banter.pool_for("male", "gain", {"banned": [base[0]]}), False)
+check("своё появляется",
+      "босс" in banter.pool_for("male", "gain", {"custom": ["босс"]}), True)
+check("свои не дублируют стандартные",
+      banter.pool_for("male", "gain", {"custom": [base[0]]}).count(base[0]), 1)
+check("пустой набор не оставляем",
+      banter.pool_for("male", "gain", {"banned": base}), [banter.FALLBACK])
+check("выбор идёт из своих",
+      banter.nickname("male", "gain", {"banned": base, "custom": ["босс"]}), "босс")
+
+print("     проверка своих обращений:")
+for text, want_ok in [("босс", True), ("мой капитан", True), ("qwe", True),
+                      ("а", False), ("", False), ("х" * 25, False),
+                      ("<b>злой</b>", False), ("босс123", False),
+                      ("  БОСС  ", True)]:
+    name, err = banter.validate_custom(text)
+    got_ok = err is None
+    if got_ok != want_ok:
+        ok = False
+        print(f"FAIL {text!r}: ожидали {'принять' if want_ok else 'отклонить'}")
+check("регистр и пробелы чистятся", banter.validate_custom("  БОСС ")[0], "босс")
+print("ok   проверка своих обращений отработала")
+
+# Telegram обрывает callback_data длиннее 64 байт — кнопки бы сломались.
+longest = "х" * banter.MAX_CUSTOM_LEN
+payload = f"nick:del:{longest}".encode("utf-8")
+check("кнопка удаления влезает в лимит Telegram", len(payload) <= 64, True)
+for pool in banter.NICKNAMES.values():
+    for n in pool:
+        if len(f"nick:del:{n}".encode("utf-8")) > 64:
+            ok = False
+            print(f"FAIL слишком длинное прозвище для кнопки: {n}")
+
 print("\n--- дроби не ломают предложения ---")
 check("литры с запятой", banter.litres(3150), "3,1")
 check("целые литры", banter.litres(2000), "2,0")
@@ -246,6 +284,29 @@ async def db_check():
     check("место тренировок сохранено", row["pref_place"], "home")
     check("тип тренировок сохранён", row["pref_kind"], "cardio")
 
+    row = await m.get_user(conn, 1)
+    check("правок обращений сначала нет",
+          m.user_nicknames(row), {"banned": [], "custom": []})
+    await m.ban_nickname(conn, 1, "бугай")
+    await m.add_nickname(conn, 1, "босс")
+    row = await m.get_user(conn, 1)
+    prefs = m.user_nicknames(row)
+    check("убранное записалось", prefs["banned"], ["бугай"])
+    check("своё записалось", prefs["custom"], ["босс"])
+    # Своё убирается насовсем, а не прячется в список убранных.
+    await m.ban_nickname(conn, 1, "босс")
+    prefs = m.user_nicknames(await m.get_user(conn, 1))
+    check("своё удаляется полностью", prefs["custom"], [])
+    check("и не попадает в убранные", "босс" in prefs["banned"], False)
+    # Возврат ранее убранного стандартного.
+    await m.add_nickname(conn, 1, "бугай")
+    prefs = m.user_nicknames(await m.get_user(conn, 1))
+    check("убранное возвращается", prefs["banned"], [])
+    await m.ban_nickname(conn, 1, "шкаф")
+    await m.reset_nicknames(conn, 1)
+    prefs = m.user_nicknames(await m.get_user(conn, 1))
+    check("сброс чистит всё", prefs, {"banned": [], "custom": []})
+
     await m.add_lead(conn, 1, "anatoly", "coaching", "@anatoly")
     cur = await conn.execute("SELECT COUNT(*) c FROM leads")
     check("заявка записана", (await cur.fetchone())["c"], 1)
@@ -275,6 +336,7 @@ async def migration_check():
     columns = {r["name"] for r in await cur.fetchall()}
     check("колонка pref_place добавлена", "pref_place" in columns, True)
     check("колонка pref_kind добавлена", "pref_kind" in columns, True)
+    check("колонка nicknames_json добавлена", "nicknames_json" in columns, True)
     cur = await conn.execute("SELECT kcal FROM users WHERE tg_id = 1")
     check("старые данные на месте", (await cur.fetchone())["kcal"], 2300)
 

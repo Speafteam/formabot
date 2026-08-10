@@ -134,7 +134,8 @@ class Runner:
             left_kcal = max(round(row["kcal"] - totals["kcal"]), 0)
             left_protein = max(round(row["protein"] - totals["protein"]), 0)
 
-            opener = banter.meal_opener(row["sex"], row["goal"], key)
+            prefs = db.user_nicknames(row)
+            opener = banter.meal_opener(row["sex"], row["goal"], key, prefs)
             lines = [opener, ""]
 
             if left_kcal > 0:
@@ -145,7 +146,7 @@ class Runner:
             # Подначка про белок — только когда его правда сильно не хватает.
             if left_protein >= 30:
                 lines.append(
-                    f"{banter.protein_nudge(row['sex'], row['goal'])} "
+                    f"{banter.protein_nudge(row['sex'], row['goal'], prefs)} "
                     f"Не добрано <b>{left_protein} г</b>."
                 )
             elif left_protein > 0:
@@ -158,7 +159,8 @@ class Runner:
             drunk = await db.water_total(self.conn, tg_id)
             norm = row["water_ml"] or 0
             left = max(norm - drunk, 0)
-            opener = banter.water_opener(row["sex"], row["goal"])
+            opener = banter.water_opener(row["sex"], row["goal"],
+                                         db.user_nicknames(row))
             tail = ("Норма закрыта, красота."
                     if left <= 0 else f"Осталось {banter.litres(left)} л.")
             text = (

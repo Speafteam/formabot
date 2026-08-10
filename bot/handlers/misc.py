@@ -25,6 +25,7 @@ class Ask(StatesGroup):
     edit_height = State()
     edit_weight = State()
     edit_age = State()
+    new_nickname = State()
 
 
 async def apply_norms(conn, tg_id: int) -> tuple[int, int]:
@@ -277,6 +278,101 @@ async def times_open(call: CallbackQuery, conn) -> None:
 async def coach_open(call: CallbackQuery) -> None:
     await call.message.edit_text(COACH_TEXT, reply_markup=keyboards.tariffs())
     await call.answer()
+
+
+# ---------- свой набор обращений ----------
+
+def nicknames_text(row, pool: list[str], prefs: dict) -> str:
+    goal = calc.GOAL_LABELS.get(row["goal"], "").lower()
+    lines = [
+        "<b>Как ко мне обращаться</b>",
+        "",
+        f"Так я зову тебя в напоминаниях. Набор подобран под цель "
+        f"«{goal}» — если сменишь цель, обновится сам.",
+        "",
+        "Жми на строку, чтобы убрать обращение. Можно добавить своё "
+        "и собрать набор с нуля.",
+    ]
+    if prefs["banned"]:
+        lines += ["", f"<i>Убрано: {', '.join(prefs['banned'])}</i>"]
+    if len(pool) == 1:
+        lines += ["", "<i>Осталось одно — последнее убрать не дам, "
+                      "иначе звать будет нечем.</i>"]
+    return "\n".join(lines)
+
+
+async def show_nicknames(message: Message, conn, tg_id: int,
+                         edit: bool = False, note: str = "") -> None:
+    row = await db.get_user(conn, tg_id)
+    if not row or not row["kcal"]:
+        await message.answer("Сначала регистрация. Жми /start.")
+        return
+    prefs = db.user_nicknames(row)
+    pool = banter.pool_for(row["sex"], row["goal"], prefs)
+    text = nicknames_text(row, pool, prefs)
+    if note:
+        text = f"{note}\n\n{text}"
+    markup = keyboards.nicknames_menu(
+        pool, prefs["custom"], bool(prefs["banned"] or prefs["custom"])
+    )
+    if edit:
+        await message.edit_text(text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "nick:menu")
+async def nick_menu(call: CallbackQuery, conn) -> None:
+    await show_nicknames(call.message, conn, call.from_user.id, edit=True)
+    await call.answer()
+
+
+@router.callback_query(F.data == "nick:add")
+async def nick_add(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(Ask.new_nickname)
+    await call.message.answer(
+        "Как тебя звать? Пришли одно слово.\n\n"
+        "Подставляется в фразы вроде «Эй, <b>босс</b>, не забыл попить водички?» — "
+        f"так что выбирай то, что там прозвучит. До {banter.MAX_CUSTOM_LEN} символов."
+    )
+    await call.answer()
+
+
+@router.message(Ask.new_nickname)
+async def nick_save(message: Message, state: FSMContext, conn) -> None:
+    name, error = banter.validate_custom(message.text or "")
+    if error:
+        await message.answer(error)
+        return
+    await state.clear()
+    await db.add_nickname(conn, message.from_user.id, name)
+    await show_nicknames(message, conn, message.from_user.id,
+                         note=f"Добавил: <b>{name}</b>.")
+
+
+@router.callback_query(F.data.startswith("nick:del:"))
+async def nick_delete(call: CallbackQuery, conn) -> None:
+    name = call.data.split(":", 2)[2]
+    row = await db.get_user(conn, call.from_user.id)
+    prefs = db.user_nicknames(row)
+    pool = banter.pool_for(row["sex"], row["goal"], prefs)
+
+    # Пустой набор оставил бы бота без обращений, поэтому последнее держим.
+    if len(pool) <= 1:
+        await call.answer("Последнее не отдам — звать будет нечем.",
+                          show_alert=True)
+        return
+
+    await db.ban_nickname(conn, call.from_user.id, name)
+    await show_nicknames(call.message, conn, call.from_user.id, edit=True)
+    await call.answer(f"Убрал «{name}»")
+
+
+@router.callback_query(F.data == "nick:reset")
+async def nick_reset(call: CallbackQuery, conn) -> None:
+    await db.reset_nicknames(conn, call.from_user.id)
+    await show_nicknames(call.message, conn, call.from_user.id, edit=True)
+    await call.answer("Вернул стандартные")
 
 
 # ---------- правка отдельных полей профиля ----------
@@ -553,6 +649,8 @@ async def help_cmd(message: Message) -> None:
         "• <b>Ещё</b> — профиль, план на неделю, напоминания, тренер\n\n"
         "В профиле правится любое поле: рост, вес, возраст, пол, образ жизни, "
         "цель, место тренировок. Норму пересчитываю сразу.\n\n"
+        "Не нравится, как я тебя зову? «Ещё» → «Как ко мне обращаться». "
+        "Лишнее убирается, своё добавляется.\n\n"
         "/profile — профиль, /times — напоминания, /reset — начать заново",
         reply_markup=keyboards.MAIN_MENU,
     )

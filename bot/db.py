@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS users (
     weigh_in      TEXT,
     pref_place    TEXT,
     pref_kind     TEXT,
+    nicknames_json TEXT,
     created_at    TEXT
 );
 
@@ -129,7 +130,8 @@ async def _migrate(conn: aiosqlite.Connection) -> None:
     """Догоняет схему у баз, созданных прошлыми версиями бота."""
     cur = await conn.execute("PRAGMA table_info(users)")
     present = {row["name"] for row in await cur.fetchall()}
-    for column, decl in (("pref_place", "TEXT"), ("pref_kind", "TEXT")):
+    for column, decl in (("pref_place", "TEXT"), ("pref_kind", "TEXT"),
+                         ("nicknames_json", "TEXT")):
         if column not in present:
             await conn.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
 
@@ -187,6 +189,65 @@ async def set_time(conn, tg_id: int, key: str, value: str) -> dict:
     )
     await conn.commit()
     return times
+
+
+# ---------- прозвища ----------
+
+def user_nicknames(row) -> dict:
+    """Правки пользователя к набору обращений.
+
+    Храним не готовый список, а разницу с набором по умолчанию: какие
+    стандартные прозвища выкинуты и какие свои добавлены. Так набор сам
+    обновится, если человек сменит цель — «здоровяк» уйдёт вместе с массой.
+    """
+    prefs = {"banned": [], "custom": []}
+    raw = row["nicknames_json"] if row is not None else None
+    if raw:
+        try:
+            saved = json.loads(raw)
+            prefs["banned"] = list(saved.get("banned") or [])
+            prefs["custom"] = list(saved.get("custom") or [])
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return prefs
+
+
+async def save_nicknames(conn, tg_id: int, prefs: dict) -> None:
+    await conn.execute(
+        "UPDATE users SET nicknames_json = ? WHERE tg_id = ?",
+        (json.dumps(prefs, ensure_ascii=False), tg_id),
+    )
+    await conn.commit()
+
+
+async def ban_nickname(conn, tg_id: int, name: str) -> dict:
+    """Убирает прозвище: своё удаляет насовсем, стандартное прячет."""
+    row = await get_user(conn, tg_id)
+    prefs = user_nicknames(row)
+    if name in prefs["custom"]:
+        prefs["custom"].remove(name)
+    elif name not in prefs["banned"]:
+        prefs["banned"].append(name)
+    await save_nicknames(conn, tg_id, prefs)
+    return prefs
+
+
+async def add_nickname(conn, tg_id: int, name: str) -> dict:
+    row = await get_user(conn, tg_id)
+    prefs = user_nicknames(row)
+    # Если прозвище раньше выкинули, а теперь вписали снова — просто вернём.
+    if name in prefs["banned"]:
+        prefs["banned"].remove(name)
+    elif name not in prefs["custom"]:
+        prefs["custom"].append(name)
+    await save_nicknames(conn, tg_id, prefs)
+    return prefs
+
+
+async def reset_nicknames(conn, tg_id: int) -> dict:
+    prefs = {"banned": [], "custom": []}
+    await save_nicknames(conn, tg_id, prefs)
+    return prefs
 
 
 # ---------- еда ----------
