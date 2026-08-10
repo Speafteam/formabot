@@ -189,9 +189,19 @@ async def weight_entry(message: Message, conn, runner, bot: Bot) -> None:
 
 # ---------- «Ещё», профиль и план на неделю ----------
 
+MORE_TITLE = "Что открыть?"
+
+
 @router.message(F.text == "Ещё")
 async def more_menu(message: Message) -> None:
-    await message.answer("Что открыть?", reply_markup=keyboards.MORE)
+    await message.answer(MORE_TITLE, reply_markup=keyboards.MORE)
+
+
+@router.callback_query(F.data == "more:back")
+async def more_back(call: CallbackQuery) -> None:
+    """Возврат в меню «Ещё» с любого экрана второго уровня."""
+    await call.message.edit_text(MORE_TITLE, reply_markup=keyboards.MORE)
+    await call.answer()
 
 
 def profile_text(row) -> str:
@@ -269,6 +279,7 @@ async def plan_open(call: CallbackQuery, conn) -> None:
             ("Сменить дни тренировок", "sched:menu"),
             ("Сменить место и тип", "edit:place"),
             ("Начать тренировку", "w:slot:am"),
+            keyboards.BACK,
         ]),
     )
     await call.answer()
@@ -425,10 +436,11 @@ async def show_achievements(message: Message, conn, tg_id: int,
                   "Два подряд — начинаем сначала.</i>"]
 
     text = "\n".join(lines)
+    markup = keyboards.inline([keyboards.BACK])
     if edit:
-        await message.edit_text(text, reply_markup=keyboards.MORE)
+        await message.edit_text(text, reply_markup=markup)
     else:
-        await message.answer(text)
+        await message.answer(text, reply_markup=markup)
 
 
 # ---------- свой набор обращений ----------

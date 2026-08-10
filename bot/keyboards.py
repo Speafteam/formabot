@@ -44,6 +44,10 @@ MAIN_MENU = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
+# Возврат в меню «Ещё». Стоит на каждом экране второго уровня, чтобы из
+# любого раздела можно было выйти, не гадая, какая кнопка вернёт назад.
+BACK = ("← Назад", "more:back")
+
 MORE = inline(
     [
         ("🏆 Достижения", "more:achievements"),
@@ -71,14 +75,9 @@ def groups_menu(chosen: set[str]) -> InlineKeyboardMarkup:
     else:
         need = MIN_GROUPS - len(chosen)
         rows += _rows([(f"Выбери ещё {need}", "w:grp:need")])
-    rows += _rows([("Отмена", "w:grp:cancel")])
+    rows += _rows([("← Назад", "w:grp:back"), ("Отмена", "w:grp:cancel")],
+                  per_row=2)
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-EVENING_MODE = inline([
-    ("Восстановление: кардио и растяжка", "w:pm:recovery"),
-    ("Силовой добор по группам", "w:pm:strength"),
-])
 
 
 def schedule_menu(schedule: dict) -> InlineKeyboardMarkup:
@@ -106,6 +105,7 @@ def schedule_menu(schedule: dict) -> InlineKeyboardMarkup:
         ("Всё включить", "sched:all"),
         ("Только будни", "sched:weekdays"),
         ("Сбросить в ноль", "sched:none"),
+        BACK,
     ], per_row=1)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -120,6 +120,7 @@ def nicknames_menu(pool: list[str], custom: list[str],
     pairs.append(("➕ Добавить своё", "nick:add"))
     if has_changes:
         pairs.append(("↩️ Вернуть стандартные", "nick:reset"))
+    pairs.append(BACK)
     return inline(pairs)
 
 SEX = inline([("Мужской", "reg:sex:male"), ("Женский", "reg:sex:female")], per_row=2)
@@ -197,6 +198,7 @@ def times_menu(times: dict) -> InlineKeyboardMarkup:
         (f"{times.get(key, '--:--')}  {label}", f"time:{key}")
         for key, label in TIME_LABELS.items()
     ]
+    pairs.append(BACK)
     return inline(pairs)
 
 
@@ -220,6 +222,7 @@ PROFILE_EDIT = inline(
         ("Место тренировок", "edit:place"),
         ("Как ко мне обращаться", "nick:menu"),
         ("Начать всё заново", "prof:redo"),
+        BACK,
     ],
     per_row=2,
 )

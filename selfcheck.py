@@ -614,6 +614,7 @@ asyncio.run(migration_check())
 
 print("\n--- путь заявки на тренера ---")
 from bot import keyboards as kb  # noqa: E402
+from bot.handlers import build_router  # noqa: E402
 from bot.handlers.misc import service_card  # noqa: E402
 
 
@@ -671,6 +672,37 @@ for markup in [kb.MORE, kb.services(), kb.SKIP_COMMENT,
             print(f"FAIL слишком длинная кнопка: {data}")
 print("ok   кнопки укладываются в лимит Telegram")
 
+print("\n--- кнопка «Назад» на каждом экране ---")
+_screens = {
+    "профиль": kb.PROFILE_EDIT,
+    "напоминания": kb.times_menu({}),
+    "прозвища": kb.nicknames_menu(["боец", "чемпион"], [], True),
+    "прозвища без правок": kb.nicknames_menu(["боец"], [], False),
+    "дни тренировок": kb.schedule_menu(dbm.default_schedule()),
+}
+for _name, _markup in _screens.items():
+    if "more:back" not in buttons(_markup):
+        ok = False
+        print(f"FAIL нет возврата на экране: {_name}")
+print("ok   со всех экранов «Ещё» можно вернуться")
+
+# В мастере тренировки возврат ведёт на предыдущий шаг, а не в меню.
+_groups_kb = buttons(kb.groups_menu({"chest", "back"}))
+check("из выбора групп есть шаг назад", "w:grp:back" in _groups_kb, True)
+check("из выбора групп есть отмена", "w:grp:cancel" in _groups_kb, True)
+
+# Каждая кнопка возврата обязана попасть в живой обработчик, иначе
+# нажатие снова будет молчать.
+_handlers = build_router()
+_known = set()
+for _sub in _handlers.sub_routers:
+    for _h in _sub.callback_query.handlers:
+        _known.add(_h.callback)
+check("обработчик возврата зарегистрирован",
+      any(getattr(c, "__name__", "") == "more_back" for c in _known), True)
+check("возврат к выбору тренировки зарегистрирован",
+      any(getattr(c, "__name__", "") == "back_to_slots" for c in _known), True)
+
 print("\n--- обращения к несуществующим функциям ---")
 # Питон не проверяет module.attr до момента вызова, поэтому опечатка или
 # переименование живут в коде молча и всплывают у пользователя нажатием
@@ -703,14 +735,7 @@ if not _broken:
     print(f"ok   все обращения к модулям существуют "
           f"(проверено {len(_watched)} модулей)")
 
-print("\n--- импорт обработчиков ---")
-try:
-    from bot.handlers import build_router
-    router = build_router()
-    print("ok   роутеры собираются")
-except Exception as err:
-    ok = False
-    print(f"FAIL роутеры не собрались: {err!r}")
+print("\nok   роутеры собираются")
 
 print("\n" + ("ВСЁ ПРОШЛО" if ok else "ЕСТЬ ОШИБКИ — см. строки FAIL"))
 sys.exit(0 if ok else 1)

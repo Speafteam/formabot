@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 router = Router()
 
 SLOT_TITLE = {"am": "Полная — около 2 часов", "pm": "Короткий блок — 25 минут"}
+SLOT_KEYBOARD = [(SLOT_TITLE["am"], "w:slot:am"), (SLOT_TITLE["pm"], "w:slot:pm")]
 
 
 @router.message(F.text == "Тренировка")
@@ -20,12 +21,15 @@ async def menu_workout(message: Message, conn) -> None:
     if not row or not row["kcal"]:
         await message.answer("Сначала регистрация. Жми /start.")
         return
-    await message.answer(
-        "Какую ставим?",
-        reply_markup=keyboards.inline(
-            [(SLOT_TITLE["am"], "w:slot:am"), (SLOT_TITLE["pm"], "w:slot:pm")]
-        ),
-    )
+    await message.answer("Какую ставим?",
+                         reply_markup=keyboards.inline(SLOT_KEYBOARD))
+
+
+@router.callback_query(F.data == "w:menu")
+async def back_to_slots(call: CallbackQuery) -> None:
+    await call.message.edit_text("Какую ставим?",
+                                 reply_markup=keyboards.inline(SLOT_KEYBOARD))
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("w:slot:"))
@@ -35,6 +39,7 @@ async def choose_slot(call: CallbackQuery) -> None:
         "Где сегодня?",
         reply_markup=keyboards.inline(
             [(label, f"w:place:{k}:{slot}") for k, label in programs.PLACES.items()]
+            + [("← Назад", "w:menu")]
         ),
     )
     await call.answer()
@@ -52,20 +57,29 @@ async def choose_place(call: CallbackQuery, conn) -> None:
     slot = parts[3] if len(parts) > 3 else "am"
     _choosing[call.from_user.id] = {"place": place, "slot": slot, "groups": set()}
 
+    await ask_kind(call, slot)
+
+
+async def ask_kind(call: CallbackQuery, slot: str) -> None:
+    """Экран выбора типа нагрузки. Вечером вместо него режим блока."""
     if slot == "pm":
         await call.message.edit_text(
-            "Вечерний блок. Что ставим?", reply_markup=keyboards.EVENING_MODE
+            "Вечерний блок. Что ставим?",
+            reply_markup=keyboards.inline(
+                [("Восстановление: кардио и растяжка", "w:pm:recovery"),
+                 ("Силовой добор по группам", "w:pm:strength"),
+                 ("← Назад", f"w:slot:{slot}")]
+            ),
         )
-        await call.answer()
-        return
-
-    await call.message.edit_text(
-        "Что качаем?",
-        reply_markup=keyboards.inline(
-            [(label, f"w:kind:{k}") for k, label in programs.KINDS.items()],
-            per_row=2,
-        ),
-    )
+    else:
+        await call.message.edit_text(
+            "Что качаем?",
+            reply_markup=keyboards.inline(
+                [(label, f"w:kind:{k}") for k, label in programs.KINDS.items()]
+                + [("← Назад", f"w:slot:{slot}")],
+                per_row=2,
+            ),
+        )
     await call.answer()
 
 
@@ -125,6 +139,10 @@ async def toggle_group(call: CallbackQuery, conn) -> None:
     if code == "need":
         await call.answer(
             f"Нужно минимум {programs.MIN_GROUPS} группы.", show_alert=True)
+        return
+
+    if code == "back":
+        await ask_kind(call, state["slot"])
         return
 
     if code == "done":
