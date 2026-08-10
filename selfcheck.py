@@ -626,7 +626,7 @@ def buttons(markup):
 check("в меню есть живой тренер", "more:coach" in buttons(kb.MORE), True)
 
 menu = buttons(kb.services())
-check("в списке все три услуги", len(menu), 3)
+check("в списке три услуги и возврат", len(menu), 4)
 for code in SERVICES:
     if f"coach:{code}" not in menu:
         ok = False
@@ -661,7 +661,9 @@ check("на карточке есть отправка", "coach:send:coaching:6"
 check("на карточке есть комментарий", "coach:note:coaching:6" in confirm, True)
 check("на карточке есть возврат", "coach:back" in confirm, True)
 check("кнопка без комментария ведёт куда надо",
-      buttons(kb.SKIP_COMMENT), ["coach:nonote"])
+      "coach:nonote" in buttons(kb.SKIP_COMMENT), True)
+check("из комментария можно уйти",
+      "coach:back" in buttons(kb.SKIP_COMMENT), True)
 
 # Все callback_data должны укладываться в лимит Telegram.
 for markup in [kb.MORE, kb.services(), kb.SKIP_COMMENT,
@@ -672,19 +674,68 @@ for markup in [kb.MORE, kb.services(), kb.SKIP_COMMENT,
             print(f"FAIL слишком длинная кнопка: {data}")
 print("ok   кнопки укладываются в лимит Telegram")
 
-print("\n--- кнопка «Назад» на каждом экране ---")
-_screens = {
+print("\n--- выход есть с каждого экрана ---")
+from aiogram.types import InlineKeyboardMarkup as _IKM  # noqa: E402
+
+# Что считается выходом: возврат в меню, к предыдущему шагу или отмена.
+ESCAPES = ("more:back", "more:profile", "coach:back", "w:menu", "w:grp:back",
+           "w:grp:cancel", "w:replan", "w:stop", "w:slot:")
+
+# Клавиатуры-константы плюс те, что собираются функциями.
+SCREENS = {
+    "меню Ещё": kb.MORE,
     "профиль": kb.PROFILE_EDIT,
+    "правка пола": kb.EDIT_SEX,
+    "правка активности": kb.EDIT_ACTIVITY,
+    "правка цели": kb.EDIT_GOAL,
+    "правка места": kb.EDIT_PLACE,
     "напоминания": kb.times_menu({}),
     "прозвища": kb.nicknames_menu(["боец", "чемпион"], [], True),
     "прозвища без правок": kb.nicknames_menu(["боец"], [], False),
     "дни тренировок": kb.schedule_menu(dbm.default_schedule()),
+    "услуги тренера": kb.services(),
+    "сроки": kb.periods_menu("coaching"),
+    "карточка услуги": kb.confirm_lead("coaching", 6),
+    "комментарий": kb.SKIP_COMMENT,
+    "группы мышц": kb.groups_menu({"chest", "back"}),
+    "группы мышц, мало выбрано": kb.groups_menu({"chest"}),
+    "программа": kb.program_actions("am"),
+    "подход": kb.set_actions(False),
+    "подход на время": kb.set_actions(True),
+    "вода": kb.WATER,
+    "отдых": kb.REST_ACTIONS,
+    "вес": kb.PROFILE_ACTIONS,
+    "регистрация: пол": kb.SEX,
+    "регистрация: активность": kb.ACTIVITY,
+    "регистрация: цель": kb.GOAL,
 }
-for _name, _markup in _screens.items():
-    if "more:back" not in buttons(_markup):
+
+# Эти экраны выхода не требуют: они прикреплены к сообщению, из которого
+# и так никуда не проваливаешься, либо это шаг обязательной регистрации.
+NO_EXIT_NEEDED = {
+    "меню Ещё", "вода", "отдых", "вес", "программа", "подход",
+    "подход на время", "регистрация: пол", "регистрация: активность",
+    "регистрация: цель",
+}
+
+for _name, _markup in SCREENS.items():
+    if _name in NO_EXIT_NEEDED:
+        continue
+    if not any(d.startswith(ESCAPES) for d in buttons(_markup)):
         ok = False
-        print(f"FAIL нет возврата на экране: {_name}")
-print("ok   со всех экранов «Ещё» можно вернуться")
+        print(f"FAIL некуда выйти с экрана: {_name}")
+print(f"ok   выход есть со всех экранов "
+      f"({len(SCREENS) - len(NO_EXIT_NEEDED)} проверено)")
+
+# Новая клавиатура-константа не должна проскочить мимо проверки.
+_declared = {v for v in SCREENS.values()}
+_forgotten = [n for n in dir(kb)
+              if isinstance(getattr(kb, n), _IKM) and getattr(kb, n) not in _declared]
+if _forgotten:
+    ok = False
+    print(f"FAIL клавиатуры не в списке проверки: {_forgotten}")
+else:
+    print("ok   все клавиатуры модуля попали в проверку")
 
 # В мастере тренировки возврат ведёт на предыдущий шаг, а не в меню.
 _groups_kb = buttons(kb.groups_menu({"chest", "back"}))

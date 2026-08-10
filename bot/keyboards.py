@@ -129,10 +129,6 @@ ACTIVITY = inline([(label, f"reg:act:{key}") for key, label in ACTIVITY_LABELS.i
 
 GOAL = inline([(label, f"reg:goal:{key}") for key, label in GOAL_LABELS.items()])
 
-PLACE = inline([(label, f"w:place:{key}") for key, label in PLACES.items()])
-
-KIND = inline([(label, f"w:kind:{key}") for key, label in KINDS.items()], per_row=2)
-
 WATER = inline(
     [("+250 мл", "water:250"), ("+500 мл", "water:500"), ("Своё", "water:custom")],
     per_row=2,
@@ -166,6 +162,7 @@ def services() -> InlineKeyboardMarkup:
         tag = "бесплатно" if not s["price_month"] else (
             money(s["price_month"]) + " / мес")
         pairs.append((f"{s['title']} — {tag}", f"coach:{key}"))
+    pairs.append(BACK)
     return inline(pairs)
 
 
@@ -190,7 +187,8 @@ def confirm_lead(key: str, months: int = 0) -> InlineKeyboardMarkup:
     ])
 
 
-SKIP_COMMENT = inline([("Без комментария", "coach:nonote")])
+SKIP_COMMENT = inline([("Без комментария", "coach:nonote"),
+                       ("← Назад", "coach:back")])
 
 
 def times_menu(times: dict) -> InlineKeyboardMarkup:
@@ -227,12 +225,21 @@ PROFILE_EDIT = inline(
     per_row=2,
 )
 
+# Возврат в профиль: эти экраны открываются из него и больше ниоткуда.
+TO_PROFILE = ("← Назад", "more:profile")
+
 EDIT_SEX = inline(
-    [("Мужской", "set:sex:male"), ("Женский", "set:sex:female")], per_row=2
+    [("Мужской", "set:sex:male"), ("Женский", "set:sex:female"), TO_PROFILE],
+    per_row=2,
 )
-EDIT_ACTIVITY = inline([(l, f"set:activity:{k}") for k, l in ACTIVITY_LABELS.items()])
-EDIT_GOAL = inline([(l, f"set:goal:{k}") for k, l in GOAL_LABELS.items()])
+EDIT_ACTIVITY = inline(
+    [(l, f"set:activity:{k}") for k, l in ACTIVITY_LABELS.items()] + [TO_PROFILE]
+)
+EDIT_GOAL = inline(
+    [(l, f"set:goal:{k}") for k, l in GOAL_LABELS.items()] + [TO_PROFILE]
+)
 EDIT_PLACE = inline(
     [(l, f"set:pref_place:{k}") for k, l in PLACES.items()]
     + [(l, f"set:pref_kind:{k}") for k, l in KINDS.items()]
+    + [TO_PROFILE]
 )
