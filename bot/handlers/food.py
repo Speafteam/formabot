@@ -35,20 +35,15 @@ def totals_block(row, totals) -> str:
 def unknown_food_text(name: str, translated: bool) -> str:
     """Объясняет, почему продукт не нашёлся, и что с этим делать."""
     if not translated:
-        text = (
-            f"Не знаю, как по-английски «{name}», а база продуктов англоязычная.\n\n"
-        )
+        text = f"Не знаю, как «{name}» по-английски, а база англоязычная.\n\n"
         similar = food_ru.suggestions(name)
         if similar:
-            text += "Может быть, вы имели в виду: " + ", ".join(similar) + "?\n\n"
-        text += (
-            "Попробуйте назвать проще — «творог» вместо «творожок» — "
-            "или напишите название по-английски."
-        )
+            text += "Может, это: " + ", ".join(similar) + "?\n\n"
+        text += "Назови проще — «творог» вместо «творожок». Или сразу по-английски."
         return text
     return (
-        f"«{name}» перевёл, но в базе такого не нашлось. "
-        "Попробуйте назвать иначе — например, «куриная грудка» вместо «курица»."
+        f"«{name}» перевёл, а в базе такого нет.\n\n"
+        "Попробуй конкретнее: «куриная грудка» вместо «курица»."
     )
 
 
@@ -59,7 +54,7 @@ def unknown_food_text(name: str, translated: bool) -> str:
 async def add_food(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
 
     name, grams = food_line(message.text)
@@ -75,7 +70,8 @@ async def add_food(message: Message, conn) -> None:
     except Exception:
         log.exception("Поиск продукта сорвался")
         await message.answer(
-            "Не смог достучаться до базы продуктов. Попробуйте ещё раз через минуту."
+            "База продуктов не отвечает. Не моя вина, но и не твоя — "
+            "попробуй через минуту."
         )
         return
 
@@ -91,7 +87,9 @@ async def add_food(message: Message, conn) -> None:
         for i, f in enumerate(found)
     ]
     await message.answer(
-        f"Что именно из этого, {grams:g} г?", reply_markup=keyboards.inline(pairs)
+        f"Что из этого, {grams:g} г?\n\n"
+        "<i>Смотри внимательно: варёное и сухое различаются втрое.</i>",
+        reply_markup=keyboards.inline(pairs),
     )
 
 
@@ -100,7 +98,7 @@ async def pick_food(call: CallbackQuery, conn) -> None:
     tg_id = call.from_user.id
     pending = _pending.get(tg_id)
     if not pending:
-        await call.answer("Список устарел, напишите продукт заново.", show_alert=True)
+        await call.answer("Список устарел. Напиши продукт заново.", show_alert=True)
         return
 
     index = int(call.data.split(":")[1])
@@ -140,7 +138,7 @@ async def pick_food(call: CallbackQuery, conn) -> None:
         f"<code>Б {result['protein']:.1f} · Ж {result['fat']:.1f} · "
         f"У {result['carbs']:.1f} · {result['kcal']:.0f} ккал</code>\n\n"
         f"{totals_block(row, totals)}",
-        reply_markup=keyboards.inline([("Убрать эту запись", "food:undo")]),
+        reply_markup=keyboards.inline([("Убрать запись", "food:undo")]),
     )
     await call.answer()
 
@@ -151,7 +149,7 @@ async def undo(call: CallbackQuery, conn) -> None:
     if not removed:
         await call.answer("Сегодня записей нет.", show_alert=True)
         return
-    await call.message.edit_text(f"Убрал «{removed['name']}» из дневника.")
+    await call.message.edit_text(f"Убрал «{removed['name']}».")
     await call.answer()
 
 
@@ -159,7 +157,7 @@ async def undo(call: CallbackQuery, conn) -> None:
 async def day_report(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
 
     totals = await db.day_totals(conn, message.from_user.id)
@@ -177,6 +175,7 @@ async def day_report(message: Message, conn) -> None:
         lines += [f"  • {m['name']}, {m['grams']:g} г — {m['kcal']:.0f} ккал"
                   for m in meals]
     else:
-        lines += ["", "Записей о еде пока нет. Напишите, например, «овсянка 60 г»."]
+        lines += ["", "Записей ноль. Что не посчитано — то не контролируется.\n"
+                      "Начни: «овсянка 60 г»."]
 
     await message.answer("\n".join(lines))

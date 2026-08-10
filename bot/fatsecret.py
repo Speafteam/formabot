@@ -56,9 +56,9 @@ def _sign(params: dict) -> str:
 async def _call(method: str, **params) -> dict:
     if not FATSECRET_READY:
         raise NotConfigured(
-            "Счётчик еды пока не подключён: в .env не заданы "
-            "FATSECRET_CLIENT_ID и FATSECRET_CLIENT_SECRET.\n\n"
-            "Ключи берутся на platform.fatsecret.com. Всё остальное в боте работает."
+            "Счётчик еды пока не подключён — не хватает ключей от базы продуктов.\n\n"
+            "Это на моей стороне, не на твоей. Всё остальное работает: "
+            "тренировки, вода, вес, напоминания."
         )
 
     query = {
@@ -82,7 +82,7 @@ async def _call(method: str, **params) -> dict:
     try:
         data = resp.json()
     except ValueError:
-        raise FoodApiError("FatSecret вернул не JSON — попробуйте позже.")
+        raise FoodApiError("База продуктов ответила ерундой. Попробуй позже.")
 
     if "error" in data:
         message = data["error"].get("message", "неизвестная ошибка")
@@ -191,8 +191,8 @@ async def macros(food_id: str, grams: float, fallback_hint: str = "") -> dict:
         values = _from_description(fallback_hint, grams)
         if values is None:
             raise FoodApiError(
-                f"У продукта «{name}» в базе нет порции в граммах — "
-                "посчитать на вашу граммовку не выйдет. Выберите другой вариант."
+                f"У «{name}» в базе нет порции в граммах — "
+                "на твою граммовку не пересчитать. Возьми другой вариант."
             )
 
     return {"name": name, "brand": brand, "grams": grams, **values}

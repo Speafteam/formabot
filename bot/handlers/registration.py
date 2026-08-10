@@ -27,18 +27,20 @@ class Reg(StatesGroup):
 
 
 HELLO = (
-    "Привет! 👋 Я ваш карманный тренер.\n\n"
-    "Вот что я беру на себя:\n\n"
-    "🏋️ <b>Тренировки</b> — две в день. Программу соберу под вашу цель и под то, "
-    "что есть под рукой: дом, зал или уличная площадка\n\n"
-    "⏱️ <b>Отдых между подходами</b> — отсчитаю сам и напишу, когда пора вставать\n\n"
-    "🍽️ <b>Калории и БЖУ</b> — просто напишите «гречка 150 г», остальное посчитаю\n\n"
-    "💧 <b>Вода и приёмы пищи</b> — напомню тогда, когда удобно именно вам\n\n"
-    "📉 <b>Вес</b> — покажу, как идёте к цели и успеваете ли к сроку\n\n"
-    "Время всех напоминаний вы ставите сами: бот подстраивается под ваш день, "
+    "У новичка две беды: не знает, что делать в зале, и жрёт как попало.\n\n"
+    "Обе закрываю.\n\n"
+    "🏋️ <b>Тренировки</b> — две в день. Программа под твою цель и под то, "
+    "что под рукой: дом, зал, площадка.\n\n"
+    "⏱️ <b>Отдых между подходами</b> — считаю сам, скажу когда вставать. "
+    "Телефон можешь убрать.\n\n"
+    "🍽️ <b>Еда</b> — пишешь «гречка 150 г», БЖУ мои.\n\n"
+    "💧 <b>Вода и приёмы пищи</b> — напомню тогда, когда удобно тебе, "
+    "а не когда мне.\n\n"
+    "📉 <b>Вес</b> — покажу, идёшь ты к цели или топчешься.\n\n"
+    "Время любого напоминания ставишь сам. Бот подстраивается под твой день, "
     "а не наоборот.\n\n"
-    "Осталось несколько вопросов — это меньше минуты.\n\n"
-    "<b>Сколько вам лет?</b>"
+    "Семь вопросов, меньше минуты. Погнали.\n\n"
+    "<b>Сколько тебе лет?</b>"
 )
 
 
@@ -68,16 +70,17 @@ async def welcome_back(message: Message, conn, row) -> None:
     drunk = await db.water_total(conn, tg_id)
 
     name = message.from_user.first_name or ""
-    lines = [f"С возвращением{', ' + name if name else ''}! 👋", "", "<b>Сегодня</b>"]
+    lines = [f"О, вернулся{', ' + name if name else ''}. Что по сегодня:", ""]
 
     left_kcal = round(row["kcal"] - totals["kcal"])
-    if totals["kcal"] > 0:
+    nothing_logged = totals["kcal"] <= 0
+    if nothing_logged:
+        lines.append(f"🔥 Норма {row['kcal']} ккал. Записей ноль.")
+    else:
         lines.append(
             f"🔥 {round(totals['kcal'])} из {row['kcal']} ккал"
-            + (f" — осталось {left_kcal}" if left_kcal > 0 else " — норма закрыта")
+            + (f", осталось {left_kcal}" if left_kcal > 0 else ". Норма закрыта.")
         )
-    else:
-        lines.append(f"🔥 Норма {row['kcal']} ккал, пока ничего не записано")
 
     lines.append(
         f"💧 {drunk / 1000:.1f} из {row['water_ml'] / 1000:.1f} л".replace(".", ",")
@@ -96,7 +99,9 @@ async def welcome_back(message: Message, conn, row) -> None:
                 line += f", в запасе {days // 7} нед."
         lines.append(line)
 
-    lines += ["", "Чем займёмся?"]
+    # Слабый ведёт дневник по настроению, сильный — каждый день.
+    lines += ["", "Дневник пустой. Так цель не берут." if nothing_logged
+              else "Идём по плану. Не сбавляй."]
     await message.answer("\n".join(lines), reply_markup=keyboards.MAIN_MENU)
 
 
@@ -112,6 +117,7 @@ async def cmd_start(message: Message, state: FSMContext, conn) -> None:
     if row and row["kcal"]:
         await welcome_back(message, conn, row)
         return
+    # Первый заход: показываем, за что взялись.
     await db.save_user(conn, message.from_user.id, username=message.from_user.username)
     await start_registration(message, state)
 
@@ -125,7 +131,7 @@ async def cmd_reset(message: Message, state: FSMContext, conn) -> None:
 async def got_age(message: Message, state: FSMContext) -> None:
     age = int_value(message.text or "", 10, 100)
     if age is None:
-        await message.answer("Нужно число от 10 до 100. Сколько вам лет?")
+        await message.answer("Число от 10 до 100. Сколько тебе лет?")
         return
     await state.update_data(age=age)
     await state.set_state(Reg.sex)
@@ -149,7 +155,7 @@ async def got_height(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(height=height)
     await state.set_state(Reg.weight)
-    await message.answer("Текущий вес в килограммах?")
+    await message.answer("Вес сейчас, в килограммах? Честно — цифры для тебя, не для меня.")
 
 
 @router.message(Reg.weight)
@@ -161,7 +167,7 @@ async def got_weight(message: Message, state: FSMContext) -> None:
     await state.update_data(weight=weight)
     await state.set_state(Reg.activity)
     await message.answer(
-        "Чем занят день помимо тренировок?", reply_markup=keyboards.ACTIVITY
+        "Чем занят день, кроме тренировок?", reply_markup=keyboards.ACTIVITY
     )
 
 
@@ -170,7 +176,7 @@ async def got_activity(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(activity=call.data.split(":")[2])
     await state.set_state(Reg.goal)
     await call.message.edit_reply_markup(reply_markup=None)
-    await call.message.answer("Ради чего занимаемся?", reply_markup=keyboards.GOAL)
+    await call.message.answer("Ради чего всё это?", reply_markup=keyboards.GOAL)
     await call.answer()
 
 
@@ -185,7 +191,8 @@ async def got_goal(call: CallbackQuery, state: FSMContext, conn, runner) -> None
         await state.set_state(Reg.target_kg)
         word = "сбросить" if goal == "lose" else "набрать"
         await call.message.answer(
-            f"До какого веса хотите {word}? Пришлите число в килограммах."
+            f"До какого веса {word}? Пришли число в килограммах.\n\n"
+            "Цель без цифры — это мечта."
         )
         return
 
@@ -200,14 +207,14 @@ async def got_target(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     if data["goal"] == "lose" and target >= data["weight"]:
-        await message.answer("Цель должна быть меньше текущего веса. Сколько ставим?")
+        await message.answer("Худеем — значит цель меньше текущего веса. Сколько ставим?")
         return
     if data["goal"] == "gain" and target <= data["weight"]:
-        await message.answer("Цель должна быть больше текущего веса. Сколько ставим?")
+        await message.answer("Набираем — значит цель больше текущего веса. Сколько ставим?")
         return
     await state.update_data(target_kg=target)
     await state.set_state(Reg.target_weeks)
-    await message.answer("За сколько недель хотите дойти? Пришлите число недель.")
+    await message.answer("За сколько недель дойдём? Пришли число недель.")
 
 
 @router.message(Reg.target_weeks)
@@ -261,7 +268,7 @@ async def finish(message: Message, state: FSMContext, conn, runner, tg_id: int) 
     await db.add_weight(conn, tg_id, data["weight"])
     await runner.reschedule(tg_id)
 
-    text = ["Готово! 🎯 Ваша норма на день:", "", norms.as_text()]
+    text = ["Посчитал. Твоя норма на день:", "", norms.as_text()]
 
     if target_kg and weeks:
         pace = calc.weekly_pace(data["weight"], target_kg, weeks)
@@ -277,10 +284,11 @@ async def finish(message: Message, state: FSMContext, conn, runner, tg_id: int) 
 
     text += [
         "",
-        "Норма пересчитывается сама при каждом взвешивании — следить не нужно.",
-        "Напоминания уже стоят. Время любого можно поправить: «Ещё» → «Напоминания».",
+        "Норму пересчитываю сам при каждом взвешивании — следить не нужно.",
+        "Напоминания уже стоят. Время любого правится: «Ещё» → «Напоминания».",
         "",
-        "Всё готово. Удачной первой тренировки! 💪",
+        "Дальше просто. Слабый ищет мотивацию, сильный открывает план и делает.",
+        "Жми «Тренировка».",
     ]
 
     await message.answer("\n".join(text), reply_markup=keyboards.MAIN_MENU)

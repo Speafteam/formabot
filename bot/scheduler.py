@@ -26,9 +26,9 @@ from .config import (
 log = logging.getLogger(__name__)
 
 MEAL_TEXT = {
-    "breakfast": "Время завтрака.",
-    "lunch": "Время обеда.",
-    "dinner": "Время ужина.",
+    "breakfast": "Завтрак.",
+    "lunch": "Обед.",
+    "dinner": "Ужин.",
 }
 
 
@@ -119,11 +119,11 @@ class Runner:
         if key in ("workout_am", "workout_pm"):
             slot = "am" if key == "workout_am" else "pm"
             if slot == "am":
-                text = ("Доброе утро! ☀️ Пора на тренировку.\n\n"
-                        "Где сегодня занимаетесь?")
+                text = ("Подъём. ☀️ Тренировка не отменяется из-за настроения.\n\n"
+                        "Где сегодня?")
             else:
-                text = ("Вечерний блок, около 25 минут. 🌙\n\n"
-                        "Где занимаетесь?")
+                text = ("Вечерний блок. 🌙 25 минут — меньше, чем ты листаешь ленту.\n\n"
+                        "Где занимаешься?")
             return text, keyboards.inline(
                 [(label, f"w:place:{k}:{slot}") for k, label in
                  keyboards.PLACES.items()]
@@ -134,10 +134,10 @@ class Runner:
             left_kcal = max(round(row["kcal"] - totals["kcal"]), 0)
             left_protein = max(round(row["protein"] - totals["protein"]), 0)
             text = (
-                f"{MEAL_TEXT[key]}\n\n"
-                f"На сегодня осталось <b>{left_kcal} ккал</b>, "
+                f"{MEAL_TEXT[key]} Осталось <b>{left_kcal} ккал</b>, "
                 f"белка не хватает <b>{left_protein} г</b>.\n\n"
-                "Напишите, что съели — например «гречка 150 г»."
+                "Мясо, рыба, творог — выбирай. Потом напиши, что съел: "
+                "«гречка 150 г», остальное моё."
             )
             return text, None
 
@@ -146,14 +146,16 @@ class Runner:
             norm = row["water_ml"] or 0
             left = max(norm - drunk, 0)
             text = (
-                f"Выпито <b>{drunk / 1000:.1f} л</b> из <b>{norm / 1000:.1f} л</b>. "
-                f"Осталось {left / 1000:.1f} л."
+                f"Вода: <b>{drunk / 1000:.1f}</b> из <b>{norm / 1000:.1f} л</b>. "
+                f"Осталось {left / 1000:.1f}.\n\n"
+                "Обезвоженная мышца не растёт. Пей."
             ).replace(".", ",")
             return text, keyboards.WATER
 
         if key == "weigh_in":
-            return ("Утро воскресенья — время сверки. ⚖️\n\n"
-                    "Встаньте на весы и пришлите вес числом."), None
+            return ("Воскресенье. ⚖️ Время сверить, что было на словах, "
+                    "а что на весах.\n\n"
+                    "Вставай и пришли вес числом."), None
 
         return None, None
 
@@ -207,7 +209,7 @@ class Runner:
 
     async def _rest_warning(self, tg_id: int) -> None:
         try:
-            await self.bot.send_message(tg_id, "⏱️ 30 секунд. Готовьтесь к подходу.")
+            await self.bot.send_message(tg_id, "⏱️ 30 секунд. Подходи к снаряду.")
         except Exception:
             log.exception("Не смог предупредить об окончании отдыха: %s", tg_id)
 
@@ -216,7 +218,7 @@ class Runner:
             await db.close_timer(self.conn, timer_id)
             from .handlers.workout import send_current_step  # поздний импорт: цикл
 
-            await self.bot.send_message(tg_id, "Время. Отдых закончен.")
+            await self.bot.send_message(tg_id, "Время. Отдых кончился.")
             await send_current_step(self.bot, self.conn, tg_id)
         except Exception:
             log.exception("Не смог закрыть отдых для %s", tg_id)

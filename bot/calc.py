@@ -128,13 +128,13 @@ def pace_warning(current_kg: float, pace_per_week: float) -> str | None:
     limit = current_kg * 0.01
     if pace_per_week > limit:
         return (
-            f"Такой темп — {pace_per_week:.2f} кг в неделю — быстрее безопасного "
-            f"({limit:.2f} кг). На нём уходит мышца, а не только жир. "
-            "Советую увеличить срок."
+            f"{pace_per_week:.2f} кг в неделю — быстрее безопасного ({limit:.2f} кг).\n"
+            "На таком темпе уходит мышца, а не жир. Похудеешь и будешь выглядеть хуже, "
+            "чем сейчас. Растяни срок."
         ).replace(".", ",")
     if pace_per_week < -limit:
         return (
-            f"Набор {abs(pace_per_week):.2f} кг в неделю — быстро. "
-            "Заметная часть прироста будет жиром."
+            f"{abs(pace_per_week):.2f} кг в неделю — это не масса, это заплыв.\n"
+            "Большая часть прироста будет жиром. Сбавь темп."
         ).replace(".", ",")
     return None

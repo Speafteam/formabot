@@ -40,9 +40,9 @@ MAIN_MENU = ReplyKeyboardMarkup(
 MORE = inline(
     [
         ("Профиль", "more:profile"),
-        ("План тренировок", "more:plan"),
+        ("План на неделю", "more:plan"),
         ("Напоминания", "more:times"),
-        ("Работа с тренером", "more:coach"),
+        ("Живой тренер", "more:coach"),
     ]
 )
 
@@ -65,17 +65,17 @@ WATER = inline(
 def program_actions(slot: str) -> InlineKeyboardMarkup:
     return inline(
         [
-            ("Начать тренировку", f"w:go:{slot}"),
-            ("Изменить план тренировок", "w:replan"),
+            ("Погнали 💪", f"w:go:{slot}"),
+            ("Не то, пересобери", "w:replan"),
             ("Сегодня пропускаю", "w:skip_day"),
         ]
     )
 
 
 def set_actions(timed: bool) -> InlineKeyboardMarkup:
-    label = "Закончил ✅" if timed else "Готово, подход закрыт ✅"
+    label = "Закончил ✅" if timed else "Подход закрыт ✅"
     return inline(
-        [(label, "w:done"), ("Пропустить упражнение", "w:next"), ("Завершить", "w:stop")],
+        [(label, "w:done"), ("Пропустить упражнение", "w:next"), ("Хватит", "w:stop")],
         per_row=1,
     )
 
@@ -107,7 +107,7 @@ def times_menu(times: dict) -> InlineKeyboardMarkup:
 
 PROFILE_ACTIONS = inline(
     [
-        ("Изменить цель по весу", "prof:target"),
+        ("Сменить цель по весу", "prof:target"),
         ("Открыть профиль", "more:profile"),
     ]
 )
@@ -123,7 +123,7 @@ PROFILE_EDIT = inline(
         ("Цель занятий", "edit:goal"),
         ("Цель по весу и срок", "prof:target"),
         ("Место тренировок", "edit:place"),
-        ("Пройти регистрацию заново", "prof:redo"),
+        ("Начать всё заново", "prof:redo"),
     ],
     per_row=2,
 )

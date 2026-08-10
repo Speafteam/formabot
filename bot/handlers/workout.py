@@ -11,17 +11,17 @@ from .. import db, keyboards, programs
 log = logging.getLogger(__name__)
 router = Router()
 
-SLOT_TITLE = {"am": "Полная тренировка, около 2 часов", "pm": "Короткий блок, 25 минут"}
+SLOT_TITLE = {"am": "Полная — около 2 часов", "pm": "Короткий блок — 25 минут"}
 
 
 @router.message(F.text == "Тренировка")
 async def menu_workout(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
     await message.answer(
-        "Какую тренировку ставим?",
+        "Какую ставим?",
         reply_markup=keyboards.inline(
             [(SLOT_TITLE["am"], "w:slot:am"), (SLOT_TITLE["pm"], "w:slot:pm")]
         ),
@@ -32,7 +32,7 @@ async def menu_workout(message: Message, conn) -> None:
 async def choose_slot(call: CallbackQuery) -> None:
     slot = call.data.split(":")[2]
     await call.message.edit_text(
-        "Где сегодня занимаетесь?",
+        "Где сегодня?",
         reply_markup=keyboards.inline(
             [(label, f"w:place:{k}:{slot}") for k, label in programs.PLACES.items()]
         ),
@@ -52,7 +52,7 @@ async def choose_place(call: CallbackQuery, conn) -> None:
         return
 
     await call.message.edit_text(
-        "Что ставим на сегодня?",
+        "Что качаем?",
         reply_markup=keyboards.inline(
             [(label, f"w:kind:{k}:{place}") for k, label in programs.KINDS.items()],
             per_row=2,
@@ -101,7 +101,7 @@ async def replan(call: CallbackQuery, conn) -> None:
     """Пересобирает программу: возвращаемся к выбору места."""
     await db.end_session(conn, call.from_user.id)
     await call.message.edit_text(
-        "Собираем заново. Какую тренировку ставим?",
+        "Собираю заново. Какую ставим?",
         reply_markup=keyboards.inline(
             [(SLOT_TITLE["am"], "w:slot:am"), (SLOT_TITLE["pm"], "w:slot:pm")]
         ),
@@ -113,7 +113,8 @@ async def replan(call: CallbackQuery, conn) -> None:
 async def skip_day(call: CallbackQuery, conn) -> None:
     await db.end_session(conn, call.from_user.id)
     await call.message.edit_text(
-        "Хорошо, сегодня пропускаем. Напомню в следующий раз."
+        "Ладно, сегодня без тренировки.\n\n"
+        "Один пропуск ничего не решает. Решает второй подряд."
     )
     await call.answer()
 
@@ -190,8 +191,7 @@ async def set_done(call: CallbackQuery, conn, runner, bot: Bot) -> None:
     await runner.arm_rest(tg_id, {"ex_index": ex_index, "set_index": set_index})
     await bot.send_message(
         tg_id,
-        "😮‍💨 Отдых <b>2:00</b>. Напишу за полминуты до конца — "
-        "можно убрать телефон.",
+        "😮‍💨 Отдых <b>2:00</b>. Свистну за полминуты — телефон можешь убрать.",
         reply_markup=keyboards.REST_ACTIONS,
     )
 
@@ -224,8 +224,8 @@ async def stop_workout(call: CallbackQuery, conn, runner) -> None:
     await db.end_session(conn, call.from_user.id)
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(
-        "Тренировка завершена досрочно. Отдыхайте — даже неполная работа лучше, "
-        "чем пропущенная. 👍"
+        "Свернули раньше времени.\n\n"
+        "Половина работы — это всё равно работа. Ноль — это ноль. Отдыхай."
     )
     await call.answer()
 
@@ -238,7 +238,7 @@ async def finish_workout(bot: Bot, conn, tg_id: int) -> None:
     await db.end_session(conn, tg_id)
     await bot.send_message(
         tg_id,
-        f"🎉 <b>{title}</b> закрыта. Примерно {minutes} минут работы — отличная работа!\n\n"
-        "Не забудьте про воду и белок в ближайший приём пищи.",
+        f"🎉 <b>{title}</b> закрыта. {minutes} минут работы — не зря пришёл.\n\n"
+        "Теперь вода и белок в ближайший приём пищи. Иначе всё это впустую.",
         reply_markup=keyboards.MAIN_MENU,
     )

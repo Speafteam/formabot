@@ -52,9 +52,9 @@ async def water_text(conn, row) -> str:
     drunk = await db.water_total(conn, row["tg_id"])
     norm = row["water_ml"] or 0
     left = max(norm - drunk, 0)
+    tail = "Норма закрыта. Молодец." if left <= 0 else f"Осталось {left / 1000:.1f} л."
     return (
-        f"Выпито <b>{drunk / 1000:.1f} л</b> из <b>{norm / 1000:.1f} л</b>.\n"
-        f"Осталось {left / 1000:.1f} л."
+        f"Выпито <b>{drunk / 1000:.1f} л</b> из <b>{norm / 1000:.1f} л</b>.\n{tail}"
     ).replace(".", ",")
 
 
@@ -62,7 +62,7 @@ async def water_text(conn, row) -> str:
 async def water_menu(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
     await message.answer(await water_text(conn, row), reply_markup=keyboards.WATER)
 
@@ -72,7 +72,7 @@ async def water_add(call: CallbackQuery, conn, state: FSMContext) -> None:
     value = call.data.split(":")[1]
     if value == "custom":
         await state.set_state(Ask.water_ml)
-        await call.message.answer("Сколько миллилитров добавить? Пришлите число.")
+        await call.message.answer("Сколько миллилитров? Пришли число.")
         await call.answer()
         return
 
@@ -117,7 +117,7 @@ def progress_text(row, history) -> str:
             if days > 0:
                 lines.append(f"В запасе: {days // 7} нед. {days % 7} дн.")
             else:
-                lines.append("Срок цели уже прошёл — поставьте новый.")
+                lines.append("Срок вышел. Ставь новый — или признай, что цель была не та.")
 
     if len(history) > 1:
         lines += ["", "<i>Последние взвешивания</i>"]
@@ -129,11 +129,11 @@ def progress_text(row, history) -> str:
 async def weight_menu(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
     history = await db.weight_history(conn, message.from_user.id)
     await message.answer(
-        progress_text(row, history) + "\n\nПришли новый вес числом, чтобы записать.",
+        progress_text(row, history) + "\n\nПришли вес числом — запишу и пересчитаю норму.",
         reply_markup=keyboards.PROFILE_ACTIONS,
     )
 
@@ -147,7 +147,7 @@ async def weight_menu(message: Message, conn) -> None:
 async def weight_entry(message: Message, conn, runner) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
 
     kg = weight_value(message.text)
@@ -167,9 +167,9 @@ async def weight_entry(message: Message, conn, runner) -> None:
 
     row = await db.get_user(conn, message.from_user.id)
     history = await db.weight_history(conn, message.from_user.id)
-    parts = [f"Записал <b>{kg:g} кг</b>.", "", progress_text(row, history)]
+    parts = [f"Записал: <b>{kg:g} кг</b>.", "", progress_text(row, history)]
     if abs(norms.kcal - old_kcal) >= 20:
-        parts += ["", f"Норма пересчитана: <b>{norms.kcal} ккал</b>, "
+        parts += ["", f"Норму пересчитал: <b>{norms.kcal} ккал</b>, "
                       f"белка {norms.protein} г."]
     await message.answer("\n".join(parts))
 
@@ -209,7 +209,7 @@ def profile_text(row) -> str:
         f"{row['kcal']} ккал · Б {row['protein']} · Ж {row['fat']} · У {row['carbs']}",
         f"Вода: {row['water_ml'] / 1000:.1f} л".replace(".", ","),
         "",
-        "<i>Меняете любое поле — норма пересчитывается сразу.</i>",
+        "<i>Меняешь любое поле — норму пересчитываю сразу.</i>",
     ]
     return "\n".join(lines)
 
@@ -217,7 +217,7 @@ def profile_text(row) -> str:
 async def show_profile(message: Message, conn, tg_id: int, edit: bool = False) -> None:
     row = await db.get_user(conn, tg_id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
     text = profile_text(row)
     if edit:
@@ -265,7 +265,7 @@ async def times_open(call: CallbackQuery, conn) -> None:
         await call.answer("Сначала /start", show_alert=True)
         return
     await call.message.edit_text(
-        "Ваше расписание. Нажмите на строку, чтобы поменять время.",
+        "Твоё расписание. Жми на строку, чтобы поменять время.",
         reply_markup=keyboards.times_menu(db.user_times(row)),
     )
     await call.answer()
@@ -281,14 +281,14 @@ async def coach_open(call: CallbackQuery) -> None:
 
 FIELD_PROMPT = {
     "height": ("Рост в сантиметрах?", Ask.edit_height),
-    "weight": ("Текущий вес в килограммах?", Ask.edit_weight),
-    "age": ("Сколько вам лет?", Ask.edit_age),
+    "weight": ("Вес сейчас, в килограммах?", Ask.edit_weight),
+    "age": ("Сколько тебе лет?", Ask.edit_age),
 }
 FIELD_CHOICE = {
     "sex": ("Пол?", keyboards.EDIT_SEX),
-    "activity": ("Чем занят день помимо тренировок?", keyboards.EDIT_ACTIVITY),
-    "goal": ("Ради чего занимаемся?", keyboards.EDIT_GOAL),
-    "place": ("Где обычно занимаетесь и какой тип нагрузки?", keyboards.EDIT_PLACE),
+    "activity": ("Чем занят день, кроме тренировок?", keyboards.EDIT_ACTIVITY),
+    "goal": ("Ради чего всё это?", keyboards.EDIT_GOAL),
+    "place": ("Где обычно занимаешься и что качаешь?", keyboards.EDIT_PLACE),
 }
 
 
@@ -315,7 +315,7 @@ async def set_field(call: CallbackQuery, conn, runner) -> None:
         note = (f"Норма: <b>{new} ккал</b>"
                 + (f" (было {old})" if old != new else ", без изменений"))
     else:
-        note = "Настройка сохранена."
+        note = "Запомнил."
 
     await call.message.edit_text(f"Готово. {note}")
     await show_profile(call.message, conn, call.from_user.id)
@@ -329,7 +329,7 @@ async def _save_number(message: Message, state: FSMContext, conn, field, value) 
         await db.add_weight(conn, message.from_user.id, value)
     old, new = await apply_norms(conn, message.from_user.id)
     note = f"Норма: <b>{new} ккал</b>" + (f" (было {old})" if old != new else "")
-    await message.answer(f"Записал. {note}")
+    await message.answer(f"Принял. {note}")
     await show_profile(message, conn, message.from_user.id)
 
 
@@ -363,7 +363,7 @@ async def edit_age(message: Message, state: FSMContext, conn) -> None:
 @router.callback_query(F.data == "prof:target")
 async def change_target(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(Ask.target_kg)
-    await call.message.answer("До какого веса идём? Пришлите число в килограммах.")
+    await call.message.answer("До какого веса идём? Пришли число в килограммах.")
     await call.answer()
 
 
@@ -375,7 +375,7 @@ async def set_target(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(target_kg=target)
     await state.set_state(Ask.target_weeks)
-    await message.answer("За сколько недель? Пришлите число недель.")
+    await message.answer("За сколько недель? Пришли число недель.")
 
 
 @router.message(Ask.target_weeks)
@@ -419,10 +419,10 @@ async def redo_profile(call: CallbackQuery, state: FSMContext) -> None:
 async def times_menu(message: Message, conn) -> None:
     row = await db.get_user(conn, message.from_user.id)
     if not row or not row["kcal"]:
-        await message.answer("Сначала пройдём регистрацию — отправьте /start.")
+        await message.answer("Сначала регистрация. Жми /start.")
         return
     await message.answer(
-        "Ваше расписание. Нажмите на строку, чтобы поменять время.",
+        "Твоё расписание. Жми на строку, чтобы поменять время.",
         reply_markup=keyboards.times_menu(db.user_times(row)),
     )
 
@@ -434,7 +434,7 @@ async def ask_time(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(time_key=key)
     await call.message.answer(
         f"Во сколько напоминать про «{TIME_LABELS[key]}»?\n"
-        "Пришлите время в виде 07:30."
+        "Пришли время в виде 07:30."
     )
     await call.answer()
 
@@ -458,11 +458,13 @@ async def save_time(message: Message, state: FSMContext, conn, runner) -> None:
 # ---------- работа с живым тренером ----------
 
 COACH_TEXT = (
-    "<b>Работа с живым тренером</b>\n\n"
-    "Бот ведёт вас по программе, но не заменит человека, который смотрит "
-    "ваше видео и правит технику. Если нужен такой — выберите формат, "
-    "мы свяжемся и подберём тренера под вашу цель.\n\n"
-    "Оплата обсуждается напрямую с тренером после знакомства."
+    "<b>Живой тренер</b>\n\n"
+    "Я веду по программе и считаю цифры. Но я не вижу, как ты приседаешь.\n\n"
+    "Человек видит. Смотрит твоё видео, правит технику, вытаскивает "
+    "из плато — там, где бот уже бессилен.\n\n"
+    "Нужен такой — выбирай формат. Свяжемся и подберём под твою цель.\n\n"
+    "<i>Оплата напрямую с тренером, после знакомства. Сначала смотришь, "
+    "потом решаешь.</i>"
 )
 
 
@@ -474,7 +476,7 @@ async def coach_menu(message: Message) -> None:
 @router.callback_query(F.data == "coach:back")
 async def coach_back(call: CallbackQuery) -> None:
     await call.message.edit_text(
-        "Выберите формат работы:", reply_markup=keyboards.tariffs()
+        "Выбирай формат:", reply_markup=keyboards.tariffs()
     )
     await call.answer()
 
@@ -513,9 +515,9 @@ async def coach_send(call: CallbackQuery, conn, bot: Bot) -> None:
             log.exception("Не смог отправить заявку админу")
 
     await call.message.edit_text(
-        f"Заявка принята: <b>{tariff['title']}</b>.\n\n"
-        "Мы напишем вам в течение дня и подберём тренера под вашу цель. "
-        "Ответьте ему прямо здесь, в Telegram."
+        f"Принял: <b>{tariff['title']}</b>.\n\n"
+        "Напишем в течение дня и подберём тренера под твою цель. "
+        "Отвечать будешь прямо здесь, в Telegram."
     )
     await call.answer()
 
@@ -529,7 +531,8 @@ async def coach_details(call: CallbackQuery) -> None:
         return
     await call.message.edit_text(
         f"<b>{tariff['title']}</b> — {tariff['price']}\n\n{tariff['about']}\n\n"
-        "Оставите заявку — передадим её тренеру вместе с вашей целью и весом.",
+        "Оставишь заявку — тренер получит её вместе с твоей целью, весом и нормой. "
+        "Не придётся объяснять всё заново.",
         reply_markup=keyboards.confirm_lead(key),
     )
     await call.answer()
@@ -539,15 +542,15 @@ async def coach_details(call: CallbackQuery) -> None:
 async def help_cmd(message: Message) -> None:
     await message.answer(
         "<b>Что я умею</b>\n\n"
-        "• Тренировка — собираю программу под цель, место и инвентарь, "
-        "веду по подходам и держу отдых\n"
-        "• Еда — напишите «гречка 150 г», посчитаю БЖУ и вычту из нормы\n"
-        "• Сегодня — сводка по калориям, БЖУ и воде\n"
-        "• Вода — добавить выпитое\n"
-        "• Вес — записать вес числом, посмотреть путь к цели\n"
-        "• Ещё — профиль, план на неделю, напоминания, тренер\n\n"
+        "• <b>Тренировка</b> — собираю программу под цель, место и инвентарь, "
+        "веду по подходам, держу отдых\n"
+        "• <b>Еда</b> — пишешь «гречка 150 г», БЖУ и остаток нормы мои\n"
+        "• <b>Сегодня</b> — сводка по калориям, БЖУ и воде\n"
+        "• <b>Вода</b> — добавить выпитое\n"
+        "• <b>Вес</b> — прислать число, посмотреть путь к цели\n"
+        "• <b>Ещё</b> — профиль, план на неделю, напоминания, тренер\n\n"
         "В профиле правится любое поле: рост, вес, возраст, пол, образ жизни, "
-        "цель и место тренировок. Норма пересчитывается сразу.\n\n"
-        "/profile — профиль, /times — напоминания, /reset — регистрация заново",
+        "цель, место тренировок. Норму пересчитываю сразу.\n\n"
+        "/profile — профиль, /times — напоминания, /reset — начать заново",
         reply_markup=keyboards.MAIN_MENU,
     )
