@@ -40,53 +40,135 @@ async def choose_slot(call: CallbackQuery) -> None:
     await call.answer()
 
 
+# Незавершённый выбор: место, тип и отмеченные группы. До старта тренировки
+# класть это в базу незачем — человек может передумать и уйти.
+_choosing: dict[int, dict] = {}
+
+
 @router.callback_query(F.data.startswith("w:place:"))
 async def choose_place(call: CallbackQuery, conn) -> None:
     parts = call.data.split(":")
     place = parts[2]
     slot = parts[3] if len(parts) > 3 else "am"
+    _choosing[call.from_user.id] = {"place": place, "slot": slot, "groups": set()}
 
     if slot == "pm":
-        # Вечером тип не спрашиваем — там всегда кардио и растяжка.
-        await build_and_show(call, conn, place, "cardio", "pm")
+        await call.message.edit_text(
+            "Вечерний блок. Что ставим?", reply_markup=keyboards.EVENING_MODE
+        )
+        await call.answer()
         return
 
     await call.message.edit_text(
         "Что качаем?",
         reply_markup=keyboards.inline(
-            [(label, f"w:kind:{k}:{place}") for k, label in programs.KINDS.items()],
+            [(label, f"w:kind:{k}") for k, label in programs.KINDS.items()],
             per_row=2,
         ),
     )
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("w:pm:"))
+async def choose_evening(call: CallbackQuery, conn) -> None:
+    mode = call.data.split(":")[2]
+    state = _choosing.get(call.from_user.id)
+    if not state:
+        await call.answer("Начни заново из меню.", show_alert=True)
+        return
+
+    if mode == "recovery":
+        program = programs.recovery_block(state["place"])
+        await show_program(call, conn, state["place"], "cardio", "pm", program)
+        return
+
+    state["kind"] = "strength"
+    await ask_groups(call)
+
+
 @router.callback_query(F.data.startswith("w:kind:"))
-async def choose_kind(call: CallbackQuery, conn) -> None:
-    _, _, kind, place = call.data.split(":")
-    await build_and_show(call, conn, place, kind, "am")
+async def choose_kind(call: CallbackQuery) -> None:
+    state = _choosing.get(call.from_user.id)
+    if not state:
+        await call.answer("Начни заново из меню.", show_alert=True)
+        return
+    state["kind"] = call.data.split(":")[2]
+    await ask_groups(call)
 
 
-async def build_and_show(call: CallbackQuery, conn, place, kind, slot) -> None:
+async def ask_groups(call: CallbackQuery) -> None:
+    state = _choosing[call.from_user.id]
+    chosen = state["groups"]
+    await call.message.edit_text(
+        f"Какие группы мышц грузим?\n\n"
+        f"Отметь минимум {programs.MIN_GROUPS}, максимум не ограничен — "
+        "программа соберётся под твой выбор.",
+        reply_markup=keyboards.groups_menu(chosen),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("w:grp:"))
+async def toggle_group(call: CallbackQuery, conn) -> None:
+    code = call.data.split(":")[2]
+    state = _choosing.get(call.from_user.id)
+    if not state:
+        await call.answer("Начни заново из меню.", show_alert=True)
+        return
+
+    if code == "cancel":
+        _choosing.pop(call.from_user.id, None)
+        await call.message.edit_text("Отменил. Возвращайся, когда будешь готов.")
+        await call.answer()
+        return
+
+    if code == "need":
+        await call.answer(
+            f"Нужно минимум {programs.MIN_GROUPS} группы.", show_alert=True)
+        return
+
+    if code == "done":
+        await build_and_show(call, conn, state)
+        return
+
+    if code in state["groups"]:
+        state["groups"].discard(code)
+    else:
+        state["groups"].add(code)
+    await ask_groups(call)
+
+
+async def build_and_show(call: CallbackQuery, conn, state: dict) -> None:
     tg_id = call.from_user.id
     row = await db.get_user(conn, tg_id)
     if not row:
         await call.answer("Сначала /start", show_alert=True)
         return
 
+    # Порядок групп фиксируем по словарю, чтобы состав не прыгал при пересборке.
+    groups = [g for g in programs.GROUPS if g in state["groups"]]
     program = programs.build(
         goal=row["goal"] or "maintain",
-        place=place,
-        kind=kind,
-        slot=slot,
+        place=state["place"],
+        kind=state["kind"],
+        slot=state["slot"],
+        groups=groups,
         day_index=date.today().toordinal(),
     )
+    await show_program(call, conn, state["place"], state["kind"],
+                       state["slot"], program)
+
+
+async def show_program(call: CallbackQuery, conn, place, kind, slot,
+                       program: dict) -> None:
+    tg_id = call.from_user.id
     await db.start_session(conn, tg_id, place, kind, slot, program)
     # Запоминаем выбор, чтобы план на неделю знал, где человек занимается.
     prefs = {"pref_place": place}
     if slot == "am":
         prefs["pref_kind"] = kind
     await db.save_user(conn, tg_id, **prefs)
+    _choosing.pop(tg_id, None)
 
     await call.message.edit_text(
         programs.render(program),

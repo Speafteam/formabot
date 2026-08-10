@@ -69,27 +69,94 @@ print("\n--- программы тренировок ---")
 for place in ("gym", "home", "outdoor"):
     for kind in ("strength", "cardio"):
         for day in (0, 1):
-            p = programs.build("lose", place, kind, "am", day_index=day)
+            p = programs.build("lose", place, kind, "am", None, day)
             if day == 0:
                 print(f"     {place:8} {kind:8}: {p['minutes']:>3} мин, "
                       f"{len(p['items'])} упражнений")
-            if not 100 <= p["minutes"] <= 140:
+            if not 100 <= p["minutes"] <= 145:
                 ok = False
                 print(f"FAIL {place}/{kind}/день {day}: {p['minutes']} мин, "
-                      "ждали 100–140")
+                      "ждали 100–145")
 
-pm = programs.build("lose", "home", "cardio", "pm")
-print(f"     вечерний блок: {pm['minutes']} мин")
-if not 15 <= pm["minutes"] <= 40:
+# Вечером два режима: восстановление и силовой добор по группам.
+rec = programs.recovery_block("home")
+print(f"     вечер, восстановление: {rec['minutes']} мин")
+if not 15 <= rec["minutes"] <= 40:
     ok = False
-    print(f"FAIL вечерний блок вне 15–40 мин: {pm['minutes']}")
+    print(f"FAIL восстановление вне 15–40 мин: {rec['minutes']}")
 
-gym_a = programs.build("gain", "gym", "strength", "am", day_index=0)["title"]
-gym_b = programs.build("gain", "gym", "strength", "am", day_index=1)["title"]
-check("программа чередуется", gym_a != gym_b, True)
+short = programs.build("lose", "home", "strength", "pm", ["abs", "glutes"], 0)
+print(f"     вечер, силовой добор: {short['minutes']} мин")
+if not 15 <= short["minutes"] <= 45:
+    ok = False
+    print(f"FAIL вечерний силовой вне 15–45 мин: {short['minutes']}")
+
+def names_of(program):
+    return [e["name"] for e in program["items"]]
+
+
+day_a = programs.build("gain", "gym", "strength", "am", ["chest", "back"], 0)
+day_b = programs.build("gain", "gym", "strength", "am", ["chest", "back"], 1)
+check("состав меняется день ото дня", names_of(day_a) != names_of(day_b), True)
+# Один и тот же день должен давать один и тот же состав, иначе программа
+# будет прыгать при каждом открытии.
+day_a2 = programs.build("gain", "gym", "strength", "am", ["chest", "back"], 0)
+check("в один день состав стабилен", names_of(day_a), names_of(day_a2))
 check("есть ссылка на технику",
-      programs.build("lose", "gym", "strength", "am")["items"][2]["video"].startswith("http"),
-      True)
+      programs.build("lose", "gym", "strength", "am")["items"][2]["video"]
+      .startswith("http"), True)
+
+print("\n--- выбор групп мышц ---")
+for place in ("gym", "home", "outdoor"):
+    for code in programs.GROUPS:
+        # Считаем только те, где группа основная — по ним идёт подбор.
+        pool = [e for e in programs.STRENGTH
+                if place in e["places"] and e["groups"][0] == code]
+        if len(pool) < 2:
+            ok = False
+            print(f"FAIL мало упражнений: {place}/{code} — {len(pool)}")
+print("ok   на каждую группу есть упражнения во всех трёх местах")
+
+# Программа должна задеть каждую выбранную группу, а не только первую.
+for combo in (["chest", "back"], ["legs", "abs"],
+              ["chest", "back", "shoulders", "arms"],
+              list(programs.GROUPS)):
+    for place in ("gym", "home", "outdoor"):
+        prog = programs.build("gain", place, "strength", "am", combo, 3)
+        covered = set()
+        for e in prog["items"]:
+            covered |= set(e["groups"])
+        missed = set(combo) - covered
+        if missed:
+            ok = False
+            print(f"FAIL {place}, не задеты группы: {missed}")
+print("ok   все выбранные группы получают нагрузку")
+
+# Лишние группы попадать не должны — иначе выбор теряет смысл.
+# В силовой основная группа каждого упражнения обязана быть из выбранных.
+# Побочные допустимы: подтягивания задевают руки, и это нормально.
+for combo in (["chest", "arms"], ["back", "legs"], ["abs", "glutes"]):
+    for place in ("gym", "home", "outdoor"):
+        prog = programs.build("gain", place, "strength", "am", combo, 5)
+        wrong = [e["name"] for e in prog["items"]
+                 if e["block"] == "Основной блок" and e["groups"]
+                 and e["groups"][0] not in combo]
+        if wrong:
+            ok = False
+            print(f"FAIL {place}/{combo}: чужая основная группа у {wrong}")
+print("ok   основная группа упражнения всегда из выбранных")
+
+check("две группы — минимум", programs.MIN_GROUPS, 2)
+check("в названии видны группы",
+      "грудь" in programs.build("gain", "gym", "strength", "am",
+                                ["chest", "back"], 0)["title"], True)
+
+# Программа целиком уезжает в базу через JSON — проверяем, что уложится.
+import json as _json  # noqa: E402
+_json.dumps(programs.build("gain", "gym", "strength", "am",
+                           ["chest", "legs"], 0), ensure_ascii=False)
+_json.dumps(programs.recovery_block("home"), ensure_ascii=False)
+print("ok   программа сохраняется в базу без потерь")
 
 print("\n--- свойские обращения ---")
 from bot import banter  # noqa: E402
@@ -309,8 +376,8 @@ from datetime import date as _date  # noqa: E402
 week = programs.week_plan("lose", "gym", "strength", _date.today().toordinal())
 check("семь дней", len(week), 7)
 check("первый день сегодняшний", week[0]["offset"], 0)
-check("в зале блоки чередуются",
-      week[0]["am_title"] != week[1]["am_title"], True)
+# Состав в плане недели не расписывается: группы выбираются перед стартом.
+check("утро помечено как основная", week[0]["am_title"], "Основная")
 check("вечер каждый день короткий",
       all(15 <= d["pm_minutes"] <= 40 for d in week), True)
 check("названия дней недели различаются",

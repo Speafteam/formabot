@@ -50,6 +50,30 @@ MORE = inline(
 )
 
 
+def groups_menu(chosen: set[str]) -> InlineKeyboardMarkup:
+    """Выбор групп мышц. Отмеченные помечены галочкой, порядок фиксирован."""
+    from .programs import GROUPS, MIN_GROUPS
+
+    pairs = [
+        (f"{'✅' if code in chosen else '➖'} {label}", f"w:grp:{code}")
+        for code, label in GROUPS.items()
+    ]
+    rows = _rows(pairs, per_row=2)
+    if len(chosen) >= MIN_GROUPS:
+        rows += _rows([(f"Собрать программу ({len(chosen)})", "w:grp:done")])
+    else:
+        need = MIN_GROUPS - len(chosen)
+        rows += _rows([(f"Выбери ещё {need}", "w:grp:need")])
+    rows += _rows([("Отмена", "w:grp:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+EVENING_MODE = inline([
+    ("Восстановление: кардио и растяжка", "w:pm:recovery"),
+    ("Силовой добор по группам", "w:pm:strength"),
+])
+
+
 def schedule_menu(schedule: dict) -> InlineKeyboardMarkup:
     """Семь строк по две кнопки: основная и короткий блок на каждый день.
 
